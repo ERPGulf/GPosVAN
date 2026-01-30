@@ -1,13 +1,13 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { drizzle } from 'drizzle-orm/expo-sqlite';
-import { useSQLiteContext } from 'expo-sqlite';
-import { useCallback } from 'react';
-import { offlineUserApi } from '../src/features/auth/api/offlineUserApi';
 import {
   getOfflineUsersFromDb,
   OfflineUserApiResponse,
   syncOfflineUsers,
-} from '../db/offlineUsersService';
+} from '@/src/infrastructure/db/offlineUsers.repository';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { drizzle } from 'drizzle-orm/expo-sqlite';
+import { useSQLiteContext } from 'expo-sqlite';
+import { useCallback } from 'react';
+import { offlineUserApi } from '../services/offlineUser.service';
 
 /**
  * Hook to fetch offline users with offline-first behavior.

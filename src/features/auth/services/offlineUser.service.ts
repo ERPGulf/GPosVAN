@@ -1,4 +1,4 @@
-import { apiClient } from './client';
+import { apiClient } from '@/src/services/api/httpClient';
 
 export const offlineUserApi = async () => {
   try {
