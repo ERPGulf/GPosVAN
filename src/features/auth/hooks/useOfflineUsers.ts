@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback } from 'react';
-import { offlineUserApi } from '../api/offlineUserApi';
+import { offlineUserApi } from '../src/features/auth/api/offlineUserApi';
 import {
   getOfflineUsersFromDb,
   OfflineUserApiResponse,
