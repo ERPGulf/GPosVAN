@@ -1,27 +1,32 @@
+import { AuthProvider } from '@/context/AuthContext';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Slot } from 'expo-router';
-import { useState } from 'react';
-import { View } from 'react-native';
+import { SQLiteProvider } from 'expo-sqlite';
+import { Suspense } from 'react';
+import { ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Sidebar } from '../components/Sidebar';
-import { TopBar } from '../components/TopBar';
 import './global.css';
 
-export default function RootLayout() {
-  const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+const queryClient = new QueryClient();
 
-  const toggleSidebar = () => {
-    setIsSidebarVisible(!isSidebarVisible);
-  };
+export default function RootLayout() {
+
 
   return (
-    <SafeAreaView className="flex-1 flex-row bg-gray-50 bg-white">
-      {isSidebarVisible && <Sidebar onToggle={toggleSidebar} />}
-      <View className="flex-1 flex-col">
-        <TopBar onToggleSidebar={toggleSidebar} isSidebarVisible={isSidebarVisible} />
-        <View className="flex-1 bg-gray-50">
-          <Slot />
-        </View>
-      </View>
-    </SafeAreaView>
+    <AuthProvider>
+      <QueryClientProvider client={queryClient}>
+        <Suspense fallback={<ActivityIndicator size="large" color="#22c55e" />}>
+          <SQLiteProvider
+            databaseName="van_pos.db"
+            options={{ enableChangeListener: true }}
+            useSuspense
+          >
+            <SafeAreaView className="flex-1 bg-gray-50">
+              <Slot />
+            </SafeAreaView>
+          </SQLiteProvider>
+        </Suspense>
+      </QueryClientProvider>
+    </AuthProvider>
   );
 }
