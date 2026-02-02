@@ -1,9 +1,9 @@
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from '@/src/features/auth';
+import { Sidebar } from '@/src/shared/components/Sidebar';
+import { TopBar } from '@/src/shared/components/TopBar';
 import { Redirect, Slot } from 'expo-router';
 import { useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { Sidebar } from '../../components/Sidebar';
-import { TopBar } from '../../components/TopBar';
 
 export default function ProtectedLayout() {
     const { isAuthenticated, isLoading } = useAuth();

@@ -1,7 +1,7 @@
-import { OrderSummary } from '@/components/OrderSummary';
-import { ProductList } from '@/components/ProductList';
-import { CartItem } from '@/types/cart';
-import { MOCK_PRODUCTS, Product } from '@/types/product';
+import { CartItem } from '@/src/features/cart/types';
+import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
+import { ProductList } from '@/src/features/products/components/ProductList';
+import { MOCK_PRODUCTS, Product } from '@/src/features/products/types';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';

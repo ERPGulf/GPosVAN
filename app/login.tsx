@@ -1,7 +1,6 @@
-import { useAuth } from '@/context/AuthContext';
-import { authenticateUser } from '@/db/offlineUsersService';
-import * as schema from '@/db/schema';
-import { useOfflineUsers } from '@/hooks/useOfflineUsers';
+import { useAuth, useOfflineUsers } from '@/src/features/auth';
+import { authenticateUser } from '@/src/infrastructure/db/offlineUsers.repository';
+import * as schema from '@/src/infrastructure/db/schema';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { useDrizzleStudio } from 'expo-drizzle-studio-plugin';
