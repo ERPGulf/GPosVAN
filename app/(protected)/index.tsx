@@ -1,11 +1,10 @@
+import { OrderSummary } from '@/components/OrderSummary';
+import { ProductList } from '@/components/ProductList';
+import { CartItem } from '@/types/cart';
+import { MOCK_PRODUCTS, Product } from '@/types/product';
 import { Ionicons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { OrderSummary } from '../components/OrderSummary';
-import { ProductList } from '../components/ProductList';
-import { CartItem } from '../types/cart';
-import { MOCK_PRODUCTS, Product } from '../types/product';
-import './global.css';
 
 const FILTER_OPTIONS = ['All', 'Consumables', 'Excluded Items', 'Products', 'Woocommerce Products'];
 
@@ -86,13 +85,15 @@ export default function App() {
               <TouchableOpacity
                 key={filter}
                 onPress={() => setSelectedFilter(filter)}
-                className={`px-4 py-2 rounded-full mr-2 border ${selectedFilter === filter
+                className={`px-4 py-2 rounded-full mr-2 border ${
+                  selectedFilter === filter
                     ? 'bg-green-500 border-green-500'
                     : 'bg-white border-gray-200 hover:bg-gray-50'
-                  }`}>
+                }`}>
                 <Text
-                  className={`font-medium text-sm ${selectedFilter === filter ? 'text-white' : 'text-gray-600'
-                    }`}>
+                  className={`font-medium text-sm ${
+                    selectedFilter === filter ? 'text-white' : 'text-gray-600'
+                  }`}>
                   {filter}
                 </Text>
               </TouchableOpacity>
