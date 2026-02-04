@@ -79,7 +79,7 @@ export default function LoginScreen() {
     return (
       <View className="flex-1 items-center justify-center bg-gray-50">
         <ActivityIndicator size="large" color="#22c55e" />
-        <Text className="mt-4 text-gray-600">Syncing users...</Text>
+        <Text className="mt-4 text-gray-600">Syncing data...</Text>
       </View>
     );
   }
