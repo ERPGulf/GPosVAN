@@ -1,5 +1,9 @@
 // src/features/auth/index.ts
 
 export { AuthProvider, useAuth } from './auth.context';
-export { useOfflineUsers } from './hooks/useOfflineUsers';
-// export type { AuthState, AuthUser } from './types';
+
+// Export hook names
+export { useLocalUsers, useSyncUsers, useUsers } from './hooks/useUsers';
+
+// Export User type from repository
+export type { User } from '@/src/infrastructure/db/users.repository';

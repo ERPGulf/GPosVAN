@@ -1,6 +1,6 @@
-import { useAuth, useOfflineUsers } from '@/src/features/auth';
-import { authenticateUser } from '@/src/infrastructure/db/offlineUsers.repository';
+import { useAuth, useUsers } from '@/src/features/auth';
 import * as schema from '@/src/infrastructure/db/schema';
+import { authenticateUser } from '@/src/infrastructure/db/users.repository';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { useDrizzleStudio } from 'expo-drizzle-studio-plugin';
@@ -36,7 +36,7 @@ export default function LoginScreen() {
   const { login } = useAuth();
 
   // Sync offline users from API
-  const { isLoading: isSyncingUsers } = useOfflineUsers();
+  const { isLoading: isSyncingUsers } = useUsers();
 
   const [isLoading, setIsLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
