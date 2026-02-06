@@ -1,19 +1,74 @@
 import { CartItem } from '@/src/features/cart/types';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
 import { ProductList } from '@/src/features/products/components/ProductList';
-import { MOCK_PRODUCTS, Product } from '@/src/features/products/types';
+import { useCategories, useProducts } from '@/src/features/products/hooks/useProducts';
+import { Product } from '@/src/features/products/types';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
-import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-
-const FILTER_OPTIONS = ['All', 'Consumables', 'Excluded Items', 'Products', 'Woocommerce Products'];
+import React, { useMemo, useState } from 'react';
+import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export default function App() {
+    const { data: dbProducts, isLoading, error } = useProducts();
+    const { data: categories } = useCategories();
     const [cartItems, setCartItems] = useState<CartItem[]>([]);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedFilter, setSelectedFilter] = useState('All');
 
-    const filteredProducts = MOCK_PRODUCTS.filter((product) => {
+    // Build filter options from categories
+    const filterOptions = useMemo(() => {
+        const categoryNames = categories
+            ?.map((cat) => cat.name)
+            .filter((name): name is string => Boolean(name)) || [];
+        return ['All', ...categoryNames];
+    }, [categories]);
+
+    // Create a lookup map for category ID to name
+    const categoryNameMap = useMemo(() => {
+        const map = new Map<string, string>();
+        categories?.forEach((cat) => {
+            if (cat.id && cat.name) {
+                map.set(cat.id, cat.name);
+            }
+        });
+        return map;
+    }, [categories]);
+
+    // Map database products to the UI Product format
+    const products: Product[] = useMemo(() => {
+        if (!dbProducts) return [];
+        return dbProducts.map((p) => ({
+            item_code: p.itemCode || '',
+            item_name: p.name || '',
+            description: '',
+            stock_uom: '',
+            image: null,
+            is_stock_item: 1,
+            has_variants: 0,
+            variant_of: null,
+            item_group: p.categoryId ? categoryNameMap.get(p.categoryId) || '' : '',
+            idx: 0,
+            has_batch_no: 0,
+            has_serial_no: 0,
+            max_discount: 0,
+            brand: '',
+            manufacturer_part_no: '',
+            rate: p.price || 0,
+            currency: 'SAR',
+            item_barcode: [],
+            actual_qty: 0,
+            serial_no_data: [],
+            batch_no_data: [],
+            attributes: '',
+            item_attributes: '',
+            item_manufacturer_part_no: '',
+            alternative_items: [],
+            wholesale_rate: 0,
+            wholesale_rate2: 0,
+            wholesale_rate3: '0.000000000',
+        }));
+    }, [dbProducts, categoryNameMap]);
+
+    const filteredProducts = products.filter((product) => {
         const matchesSearch =
             product.item_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
             product.item_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -23,6 +78,7 @@ export default function App() {
 
         return matchesSearch && matchesFilter;
     });
+
 
     const addToCart = (product: Product) => {
         setCartItems((currentItems) => {
@@ -81,7 +137,7 @@ export default function App() {
 
                     {/* Filter Chips */}
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} className="flex-row">
-                        {FILTER_OPTIONS.map((filter) => (
+                        {filterOptions.map((filter) => (
                             <TouchableOpacity
                                 key={filter}
                                 onPress={() => setSelectedFilter(filter)}
@@ -100,7 +156,21 @@ export default function App() {
                 </View>
 
                 {/* Product List */}
-                <ProductList products={filteredProducts} onAddToCart={addToCart} />
+                {isLoading ? (
+                    <View className="flex-1 items-center justify-center">
+                        <ActivityIndicator size="large" color="#22c55e" />
+                        <Text className="mt-4 text-gray-500">Loading products...</Text>
+                    </View>
+                ) : error ? (
+                    <View className="flex-1 items-center justify-center p-4">
+                        <Ionicons name="alert-circle-outline" size={48} color="#ef4444" />
+                        <Text className="mt-4 text-red-500 text-center">
+                            Failed to load products. Please try again.
+                        </Text>
+                    </View>
+                ) : (
+                    <ProductList products={filteredProducts} onAddToCart={addToCart} />
+                )}
             </View>
 
             {/* Right Column: Order Summary */}

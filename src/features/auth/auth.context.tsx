@@ -1,13 +1,13 @@
-import { OfflineUser } from '@/src/infrastructure/db/offlineUsers.repository';
+import { User } from '@/src/infrastructure/db/users.repository';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
 const AUTH_STORAGE_KEY = '@gposvan_auth_user';
 
 interface AuthContextType {
-  user: OfflineUser | null;
+  user: User | null;
   isLoading: boolean;
-  login: (user: OfflineUser) => Promise<void>;
+  login: (user: User) => Promise<void>;
   logout: () => Promise<void>;
   isAuthenticated: boolean;
 }
@@ -17,15 +17,15 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 /**
  * Validate that the stored data has required user fields
  */
-const isValidUser = (data: unknown): data is OfflineUser => {
+const isValidUser = (data: unknown): data is User => {
   if (!data || typeof data !== 'object') return false;
   const user = data as Record<string, unknown>;
-  // At minimum, a valid user should have a 'name' field (primary key)
-  return typeof user.name === 'string' && user.name.length > 0;
+  // At minimum, a valid user should have an 'id' field (primary key)
+  return typeof user.id === 'string' && user.id.length > 0;
 };
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<OfflineUser | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Load user from storage on app start
@@ -45,7 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           // Validate the parsed data
           if (isValidUser(parsedUser)) {
-            if (__DEV__) console.log('[Auth] Valid user found:', parsedUser.offlineUsername);
+            if (__DEV__) console.log('[Auth] Valid user found:', parsedUser.username);
             setUser(parsedUser);
           } else {
             // Invalid data - clear corrupted storage
@@ -66,14 +66,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const login = async (userData: OfflineUser) => {
+  const login = async (userData: User) => {
     // Validate before saving
     if (!isValidUser(userData)) {
       throw new Error('Invalid user data: missing required fields');
     }
 
     try {
-      if (__DEV__) console.log('[Auth] Saving user to AsyncStorage:', userData.offlineUsername);
+      if (__DEV__) console.log('[Auth] Saving user to AsyncStorage:', userData.username);
       await AsyncStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(userData));
       setUser(userData);
       if (__DEV__) console.log('[Auth] User saved successfully!');
