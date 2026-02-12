@@ -1,16 +1,20 @@
-import { CartItem } from '@/src/features/cart/types';
+import { useCart } from '@/src/features/cart/context/CartContext';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
 import { ProductList } from '@/src/features/products/components/ProductList';
 import { useCategories, useProducts } from '@/src/features/products/hooks/useProducts';
 import { Product } from '@/src/features/products/types';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 export default function App() {
     const { data: dbProducts, isLoading, error } = useProducts();
     const { data: categories } = useCategories();
-    const [cartItems, setCartItems] = useState<CartItem[]>([]);
+    // const [cartItems, setCartItems] = useState<CartItem[]>([]); // Removed local state
+    const { cartItems, addToCart, removeFromCart, updateQuantity } = useCart(); // Use global context
+    const router = useRouter();
+
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedFilter, setSelectedFilter] = useState('All');
 
@@ -79,45 +83,6 @@ export default function App() {
         return matchesSearch && matchesFilter;
     });
 
-
-    const addToCart = (product: Product) => {
-        setCartItems((currentItems) => {
-            const existingIndex = currentItems.findIndex(
-                (item) => item.product.item_code === product.item_code,
-            );
-            if (existingIndex >= 0) {
-                const newItems = [...currentItems];
-                newItems[existingIndex].quantity += 1;
-                return newItems;
-            }
-            return [...currentItems, { product, quantity: 1 }];
-        });
-    };
-
-    const removeFromCart = (index: number) => {
-        const newCart = [...cartItems];
-        newCart.splice(index, 1);
-        setCartItems(newCart);
-    };
-
-    const updateQuantity = (index: number, delta: number) => {
-        setCartItems((currentItems) => {
-            const newItems = [...currentItems];
-            const item = newItems[index];
-            const newQuantity = item.quantity + delta;
-
-            if (newQuantity <= 0) {
-                // Option: Remove item if quantity becomes 0?
-                // For now, let's keep it min 1, user can use trash icon to remove.
-                if (newQuantity === 0) return currentItems;
-                return currentItems;
-            }
-
-            item.quantity = newQuantity;
-            return newItems;
-        });
-    };
-
     return (
         <View className="flex-1 flex-row bg-white">
             {/* Left Column: Products */}
@@ -144,10 +109,10 @@ export default function App() {
                                 className={`px-4 py-2 rounded-full mr-2 border ${selectedFilter === filter
                                     ? 'bg-green-500 border-green-500'
                                     : 'bg-white border-gray-200 hover:bg-gray-50'
-                                    }`}>
+                                    } `}>
                                 <Text
                                     className={`font-medium text-sm ${selectedFilter === filter ? 'text-white' : 'text-gray-600'
-                                        }`}>
+                                        } `}>
                                     {filter}
                                 </Text>
                             </TouchableOpacity>
@@ -179,6 +144,7 @@ export default function App() {
                     cartItems={cartItems}
                     onRemoveItem={removeFromCart}
                     onUpdateQuantity={updateQuantity}
+                    onCheckout={() => router.push('/checkout')}
                 />
             </View>
         </View>

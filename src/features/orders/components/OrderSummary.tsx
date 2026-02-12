@@ -8,9 +8,11 @@ interface OrderSummaryProps {
   cartItems: CartItem[];
   onRemoveItem: (index: number) => void;
   onUpdateQuantity: (index: number, delta: number) => void;
+  onCheckout: () => void;
+  showActions?: boolean;
 }
 
-export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity }: OrderSummaryProps) {
+export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onCheckout, showActions = true }: OrderSummaryProps) {
   const subtotal = cartItems.reduce((sum, item) => sum + item.product.rate * item.quantity, 0);
   const tax = subtotal * 0.15; // Assuming 15% VAT
   const total = subtotal + tax;
@@ -156,14 +158,16 @@ export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity }: Orde
           <Text className="text-lg font-bold">{total.toFixed(2)}</Text>
         </View>
 
-        <View className="flex-row gap-3">
-          <TouchableOpacity className="flex-1 bg-gray-200 py-3 rounded-xl items-center">
-            <Text className="font-semibold text-gray-700">Save</Text>
-          </TouchableOpacity>
-          <TouchableOpacity className="flex-1 bg-green-500 py-3 rounded-xl items-center">
-            <Text className="font-semibold text-white">Checkout</Text>
-          </TouchableOpacity>
-        </View>
+        {showActions && (
+          <View className="flex-row gap-3">
+            <TouchableOpacity className="flex-1 bg-gray-200 py-3 rounded-xl items-center">
+              <Text className="font-semibold text-gray-700">Save</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onCheckout} className="flex-1 bg-green-500 py-3 rounded-xl items-center">
+              <Text className="font-semibold text-white">Checkout</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
     </View>
   );
