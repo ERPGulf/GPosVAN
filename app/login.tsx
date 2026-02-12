@@ -97,7 +97,7 @@ export default function LoginScreen() {
             <View className="w-16 h-16 bg-green-500 rounded-2xl items-center justify-center mb-4 shadow-lg">
               <Text className="text-3xl text-white font-bold">V</Text>
             </View>
-            <Text className="text-2xl font-bold text-gray-800">Van POS</Text>
+            <Text className="text-2xl font-bold text-gray-800">GPos Van</Text>
             <Text className="text-gray-500 mt-1">Sign in to continue</Text>
           </View>
 
@@ -183,7 +183,7 @@ export default function LoginScreen() {
         </View>
 
         {/* Footer */}
-        <Text className="mt-8 text-gray-400 text-sm">© 2026 Van POS. All rights reserved.</Text>
+        <Text className="mt-8 text-gray-400 text-sm">© 2026 GPos Van. All rights reserved.</Text>
       </View>
     </KeyboardAvoidingView>
   );

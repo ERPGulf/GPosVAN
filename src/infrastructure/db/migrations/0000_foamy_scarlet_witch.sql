@@ -12,20 +12,26 @@ CREATE TABLE `Category` (
 	`is_disabled` integer
 );
 --> statement-breakpoint
-CREATE TABLE `offline_users` (
-	`name` text PRIMARY KEY NOT NULL,
-	`offline_username` text,
-	`shop_name` text,
-	`password` text,
-	`custom_cashier_name` text,
-	`actual_user_name` text,
-	`branch_address` text,
-	`print_template` text,
-	`custom_print_format` text,
-	`custom_is_admin` integer,
-	`pos_profiles` text
+CREATE TABLE `Customers` (
+	`id` text PRIMARY KEY NOT NULL,
+	`name` text,
+	`phone_no` text,
+	`is_default` integer,
+	`is_disabled` integer,
+	`vat_number` text,
+	`address_line_1` text,
+	`address_line_2` text,
+	`building_no` text,
+	`po_box_no` text,
+	`city` text,
+	`company` text,
+	`customer_group` text,
+	`customer_registration_no` text,
+	`customer_registration_type` text,
+	`sync_status` text DEFAULT 'synced'
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `Customers_phone_no_unique` ON `Customers` (`phone_no`);--> statement-breakpoint
 CREATE TABLE `Product` (
 	`id` integer PRIMARY KEY NOT NULL,
 	`item_id` text,
@@ -49,4 +55,17 @@ CREATE TABLE `UnitOfMeasure` (
 	`last_updated` integer,
 	`product_id` integer,
 	FOREIGN KEY (`product_id`) REFERENCES `Product`(`id`) ON UPDATE no action ON DELETE no action
+);
+--> statement-breakpoint
+CREATE TABLE `Users` (
+	`id` text PRIMARY KEY NOT NULL,
+	`username` text,
+	`password` text,
+	`email` text,
+	`address` text,
+	`shop_name` text,
+	`invoice_template` text,
+	`is_admin` integer,
+	`pos_profile` text,
+	`cashier_name` text
 );

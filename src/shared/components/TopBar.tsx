@@ -26,10 +26,10 @@ export function TopBar({ onToggleSidebar, isSidebarVisible }: TopBarProps) {
                     <Text className="text-xl font-bold text-gray-800">GPosVan</Text>
                 </View>
 
-                {/* Divider */}
+                {/* Divider
                 <View className="w-[1px] h-6 bg-gray-300 mx-2" />
 
-                <Text className="text-lg font-semibold text-gray-600">Items</Text>
+                <Text className="text-lg font-semibold text-gray-600">Items</Text> */}
             </View>
 
             {/* User Profile / Actions */}
