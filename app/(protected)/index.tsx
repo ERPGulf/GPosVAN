@@ -1,16 +1,20 @@
-import { CartItem } from '@/src/features/cart/types';
+import { useCart } from '@/src/features/cart/context/CartContext';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
 import { ProductList } from '@/src/features/products/components/ProductList';
-import { useCategories, useProducts } from '@/src/features/products/hooks/useProducts';
-import { Product } from '@/src/features/products/types';
+import { useBarcodes, useCategories, useProducts } from '@/src/features/products/hooks/useProducts';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+;
 
 export default function App() {
     const { data: dbProducts, isLoading, error } = useProducts();
     const { data: categories } = useCategories();
-    const [cartItems, setCartItems] = useState<CartItem[]>([]);
+    // const [cartItems, setCartItems] = useState<CartItem[]>([]); // Removed local state
+    const { cartItems, addToCart, removeFromCart, updateQuantity } = useCart(); // Use global context
+    const router = useRouter();
+
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedFilter, setSelectedFilter] = useState('All');
 
@@ -33,90 +37,47 @@ export default function App() {
         return map;
     }, [categories]);
 
-    // Map database products to the UI Product format
-    const products: Product[] = useMemo(() => {
+    const { data: barcodeData } = useBarcodes();
+
+    // Build a lookup: "productId-uom" → list of barcode strings
+    const barcodeMap = useMemo(() => {
+        const map = new Map<string, string[]>();
+        barcodeData?.forEach((bc) => {
+            if (bc.productId != null && bc.barCode) {
+                const key = `${bc.productId}-${bc.uom || ''}`;
+                const existing = map.get(key) || [];
+                existing.push(bc.barCode.toLowerCase());
+                map.set(key, existing);
+            }
+        });
+        return map;
+    }, [barcodeData]);
+
+    // Filter products using name, itemCode, and barcode
+    const filteredProducts = useMemo(() => {
         if (!dbProducts) return [];
-        return dbProducts.map((p) => ({
-            item_code: p.itemCode || '',
-            item_name: p.name || '',
-            description: '',
-            stock_uom: '',
-            image: null,
-            is_stock_item: 1,
-            has_variants: 0,
-            variant_of: null,
-            item_group: p.categoryId ? categoryNameMap.get(p.categoryId) || '' : '',
-            idx: 0,
-            has_batch_no: 0,
-            has_serial_no: 0,
-            max_discount: 0,
-            brand: '',
-            manufacturer_part_no: '',
-            rate: p.price || 0,
-            currency: 'SAR',
-            item_barcode: [],
-            actual_qty: 0,
-            serial_no_data: [],
-            batch_no_data: [],
-            attributes: '',
-            item_attributes: '',
-            item_manufacturer_part_no: '',
-            alternative_items: [],
-            wholesale_rate: 0,
-            wholesale_rate2: 0,
-            wholesale_rate3: '0.000000000',
-        }));
-    }, [dbProducts, categoryNameMap]);
+        return dbProducts.filter((product) => {
+            const name = product.name?.toLowerCase() || '';
+            const itemCode = product.itemCode?.toLowerCase() || '';
+            const query = searchQuery.toLowerCase();
 
-    const filteredProducts = products.filter((product) => {
-        const matchesSearch =
-            product.item_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            product.item_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            product.manufacturer_part_no.toLowerCase().includes(searchQuery.toLowerCase());
+            // Check name and item code
+            const matchesNameOrCode = name.includes(query) || itemCode.includes(query);
 
-        const matchesFilter = selectedFilter === 'All' || product.item_group === selectedFilter;
+            // Check barcodes for this product+uom
+            const barcodeKey = `${product.id}-${product.uom || ''}`;
+            const productBarcodes = barcodeMap.get(barcodeKey) || [];
+            const matchesBarcode = productBarcodes.some((bc) => bc === query);
 
-        return matchesSearch && matchesFilter;
-    });
+            const matchesSearch = matchesNameOrCode || matchesBarcode;
 
+            const matchesFilter =
+                selectedFilter === 'All' ||
+                (product.categoryId ? categoryNameMap.get(product.categoryId) === selectedFilter : false);
 
-    const addToCart = (product: Product) => {
-        setCartItems((currentItems) => {
-            const existingIndex = currentItems.findIndex(
-                (item) => item.product.item_code === product.item_code,
-            );
-            if (existingIndex >= 0) {
-                const newItems = [...currentItems];
-                newItems[existingIndex].quantity += 1;
-                return newItems;
-            }
-            return [...currentItems, { product, quantity: 1 }];
+            return matchesSearch && matchesFilter;
         });
-    };
-
-    const removeFromCart = (index: number) => {
-        const newCart = [...cartItems];
-        newCart.splice(index, 1);
-        setCartItems(newCart);
-    };
-
-    const updateQuantity = (index: number, delta: number) => {
-        setCartItems((currentItems) => {
-            const newItems = [...currentItems];
-            const item = newItems[index];
-            const newQuantity = item.quantity + delta;
-
-            if (newQuantity <= 0) {
-                // Option: Remove item if quantity becomes 0?
-                // For now, let's keep it min 1, user can use trash icon to remove.
-                if (newQuantity === 0) return currentItems;
-                return currentItems;
-            }
-
-            item.quantity = newQuantity;
-            return newItems;
-        });
-    };
+    }, [dbProducts, searchQuery, selectedFilter, categoryNameMap, barcodeMap]);
 
     return (
         <View className="flex-1 flex-row bg-white">
@@ -128,7 +89,7 @@ export default function App() {
                         <Ionicons name="search" size={20} color="#9ca3af" />
                         <TextInput
                             className="flex-1 ml-3 text-gray-800 text-base"
-                            placeholder="Search by Name, Part Number, or Item Code..."
+                            placeholder="Search by Name, Item Code, or Barcode..."
                             value={searchQuery}
                             onChangeText={setSearchQuery}
                             placeholderTextColor="#9ca3af"
@@ -144,10 +105,10 @@ export default function App() {
                                 className={`px-4 py-2 rounded-full mr-2 border ${selectedFilter === filter
                                     ? 'bg-green-500 border-green-500'
                                     : 'bg-white border-gray-200 hover:bg-gray-50'
-                                    }`}>
+                                    } `}>
                                 <Text
                                     className={`font-medium text-sm ${selectedFilter === filter ? 'text-white' : 'text-gray-600'
-                                        }`}>
+                                        } `}>
                                     {filter}
                                 </Text>
                             </TouchableOpacity>
@@ -179,6 +140,7 @@ export default function App() {
                     cartItems={cartItems}
                     onRemoveItem={removeFromCart}
                     onUpdateQuantity={updateQuantity}
+                    onCheckout={() => router.push('/checkout')}
                 />
             </View>
         </View>

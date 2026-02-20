@@ -1,6 +1,8 @@
 import {
+  getAllBarcodes,
   getAllCategories,
   getAllProducts,
+  getProductsWithUom,
   syncAllProducts,
 } from '@/src/infrastructure/db/products.repository';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -9,10 +11,10 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useCallback } from 'react';
 
 /**
- * Hook to fetch products with offline-first behavior.
+ * Hook to fetch products with UOM data using offline-first behavior.
  * - Tries to sync products from API to local database
  * - If API fails (offline), falls back to local SQLite data
- * - Always returns data from the local database for consistency
+ * - Returns ProductWithUom[] from a LEFT JOIN of products and unitOfMeasures
  */
 export const useProducts = () => {
   const db = useSQLiteContext();
@@ -29,8 +31,8 @@ export const useProducts = () => {
         console.log('Product sync failed, using local data:', error);
       }
 
-      // Always return products from local database
-      return await getAllProducts(drizzleDb);
+      // Always return products with UOM data from local database
+      return await getProductsWithUom(drizzleDb);
     },
     retry: 1,
     refetchOnWindowFocus: false,
@@ -64,6 +66,21 @@ export const useCategories = () => {
   return useQuery({
     queryKey: ['categories'],
     queryFn: () => getAllCategories(drizzleDb),
+    retry: 1,
+    refetchOnWindowFocus: false,
+  });
+};
+
+/**
+ * Hook to get all barcodes from the local database.
+ */
+export const useBarcodes = () => {
+  const db = useSQLiteContext();
+  const drizzleDb = drizzle(db);
+
+  return useQuery({
+    queryKey: ['barcodes'],
+    queryFn: () => getAllBarcodes(drizzleDb),
     retry: 1,
     refetchOnWindowFocus: false,
   });

@@ -1,4 +1,5 @@
 import { useAuth } from '@/src/features/auth';
+import { CartProvider } from '@/src/features/cart/context/CartContext';
 import { Sidebar } from '@/src/shared/components/Sidebar';
 import { TopBar } from '@/src/shared/components/TopBar';
 import { Redirect, Slot } from 'expo-router';
@@ -28,14 +29,16 @@ export default function ProtectedLayout() {
     }
 
     return (
-        <View className="flex-1 flex-row bg-white">
-            {isSidebarVisible && <Sidebar onToggle={toggleSidebar} />}
-            <View className="flex-1 flex-col">
-                <TopBar onToggleSidebar={toggleSidebar} isSidebarVisible={isSidebarVisible} />
-                <View className="flex-1 bg-gray-50">
-                    <Slot />
+        <CartProvider>
+            <View className="flex-1 flex-row bg-white">
+                {isSidebarVisible && <Sidebar onToggle={toggleSidebar} />}
+                <View className="flex-1 flex-col">
+                    <TopBar onToggleSidebar={toggleSidebar} isSidebarVisible={isSidebarVisible} />
+                    <View className="flex-1 bg-gray-50">
+                        <Slot />
+                    </View>
                 </View>
             </View>
-        </View>
+        </CartProvider>
     );
 }

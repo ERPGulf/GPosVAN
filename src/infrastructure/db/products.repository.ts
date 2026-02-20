@@ -1,4 +1,5 @@
 import { fetchProducts } from '@/src/features/products/services/productApi.service';
+import { ProductWithUom } from '@/src/features/products/types/product.types';
 import { ApiItemGroup, GetItemsResponse } from '@/src/features/products/types/productApi.types';
 import { eq, getTableColumns, sql, SQL } from 'drizzle-orm';
 import { ExpoSQLiteDatabase } from 'drizzle-orm/expo-sqlite';
@@ -198,10 +199,48 @@ export const syncAllProducts = async (db: ExpoSQLiteDatabase): Promise<void> => 
 };
 
 /**
- * Get all products from the local database.
+ * Get all products from the local database, joined with their UOM data.
+ * Returns one row per product-UOM combination (flat, no grouping).
+ * A product with 3 UOMs will produce 3 rows.
+ * Uses INNER JOIN since every product has at least one UOM.
+ */
+export const getProductsWithUom = async (db: ExpoSQLiteDatabase): Promise<ProductWithUom[]> => {
+  return db
+    .select({
+      // Product columns
+      id: products.id,
+      itemId: products.itemId,
+      name: products.name,
+      localizedEnglishName: products.localizedEnglishName,
+      itemCode: products.itemCode,
+      price: products.price,
+      taxPercentage: products.taxPercentage,
+      isDisabled: products.isDisabled,
+      categoryId: products.categoryId,
+      // UOM columns
+      uomId: unitOfMeasures.id,
+      uom: unitOfMeasures.uom,
+      conversionFactor: unitOfMeasures.conversionFactor,
+      uomPrice: unitOfMeasures.amount,
+      isPriceEditable: unitOfMeasures.isPriceEditable,
+      isQuantityEditable: unitOfMeasures.isQuantityEditable,
+    })
+    .from(products)
+    .innerJoin(unitOfMeasures, eq(products.id, unitOfMeasures.productId));
+};
+
+/**
+ * Get all products from the local database (flat, no joins).
  */
 export const getAllProducts = async (db: ExpoSQLiteDatabase) => {
   return db.select().from(products);
+};
+
+/**
+ * Get all barcodes from the local database.
+ */
+export const getAllBarcodes = async (db: ExpoSQLiteDatabase) => {
+  return db.select().from(barcodes);
 };
 
 /**
