@@ -1,11 +1,12 @@
-import migrations from '@/drizzle/migrations';
 import { AuthProvider } from '@/src/features/auth';
+import migrations from '@/src/infrastructure/db/migrations/migrations';
+import { syncAllProducts } from '@/src/infrastructure/db/products.repository';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { useMigrations } from 'drizzle-orm/expo-sqlite/migrator';
 import { Slot } from 'expo-router';
 import { openDatabaseSync, SQLiteProvider } from 'expo-sqlite';
-import { Suspense } from 'react';
+import { Suspense, useEffect } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import './global.css';
@@ -16,6 +17,21 @@ const db = drizzle(expoDb);
 
 export default function RootLayout() {
   const { success, error } = useMigrations(db, migrations);
+
+  // Sync products from API after migrations complete
+  useEffect(() => {
+    if (success) {
+      syncAllProducts(db)
+        .then(() => {
+          if (__DEV__) {
+            console.log('[RootLayout] Products synced successfully');
+          }
+        })
+        .catch((err) => {
+          console.error('[RootLayout] Failed to sync products:', err);
+        });
+    }
+  }, [success]);
 
   if (error) {
     return (
@@ -53,3 +69,4 @@ export default function RootLayout() {
     </AuthProvider>
   );
 }
+
