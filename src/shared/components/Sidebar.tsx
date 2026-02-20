@@ -13,7 +13,7 @@ type NavItem = {
 const NAV_ITEMS: NavItem[] = [
     { name: 'Home', label: 'Home', icon: 'home-outline', route: '/' },
     { name: 'Customers', label: 'Customers', icon: 'account-group-outline', route: '/customers' },
-    { name: 'Pricing', label: 'Pricing', icon: 'tag-outline', route: '/pricing' },
+    // { name: 'Pricing', label: 'Pricing', icon: 'tag-outline', route: '/pricing' },
     // { name: 'Orders', label: 'Orders', icon: 'clipboard-text-outline', route: '/orders' },
 ];
 
@@ -27,7 +27,7 @@ export function Sidebar({ onToggle }: SidebarProps) {
 
     const handlePress = (route: string) => {
         // In a real app we'd navigate to the route
-        // router.push(route);
+        router.push(route as any);
         console.log('Navigating to', route);
     };
 

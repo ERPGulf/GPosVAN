@@ -1,4 +1,5 @@
 import { AuthProvider } from '@/src/features/auth';
+import { pushPendingCustomers, syncAllCustomers } from '@/src/infrastructure/db/customers.repository';
 import migrations from '@/src/infrastructure/db/migrations/migrations';
 import { syncAllProducts } from '@/src/infrastructure/db/products.repository';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -11,6 +12,7 @@ import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import './global.css';
 
+
 const queryClient = new QueryClient();
 const expoDb = openDatabaseSync('van_pos.db', { enableChangeListener: true });
 const db = drizzle(expoDb);
@@ -18,17 +20,41 @@ const db = drizzle(expoDb);
 export default function RootLayout() {
   const { success, error } = useMigrations(db, migrations);
 
-  // Sync products from API after migrations complete
+  // Sync products and customers from API after migrations complete
   useEffect(() => {
     if (success) {
-      syncAllProducts(db)
+      // First push any offline-created customers, then pull latest data
+      pushPendingCustomers(db)
         .then(() => {
           if (__DEV__) {
-            console.log('[RootLayout] Products synced successfully');
+            console.log('[RootLayout] Pending customers pushed successfully');
           }
         })
         .catch((err) => {
-          console.error('[RootLayout] Failed to sync products:', err);
+          console.error('[RootLayout] Failed to push pending customers:', err);
+        })
+        .finally(() => {
+          // Pull latest data from API (regardless of push result)
+          Promise.all([
+            syncAllProducts(db)
+              .then(() => {
+                if (__DEV__) {
+                  console.log('[RootLayout] Products synced successfully');
+                }
+              })
+              .catch((err) => {
+                console.error('[RootLayout] Failed to sync products:', err);
+              }),
+            syncAllCustomers(db)
+              .then(() => {
+                if (__DEV__) {
+                  console.log('[RootLayout] Customers synced successfully');
+                }
+              })
+              .catch((err) => {
+                console.error('[RootLayout] Failed to sync customers:', err);
+              }),
+          ]);
         });
     }
   }, [success]);

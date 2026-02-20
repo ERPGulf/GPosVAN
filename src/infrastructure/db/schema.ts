@@ -14,6 +14,27 @@ export const users = sqliteTable('Users', {
   cashierName: text('cashier_name'),
 });
 
+// Customer table
+export const customers = sqliteTable('Customers', {
+  id: text('id').primaryKey(),
+  name: text('name'),
+  phoneNo: text('phone_no').unique(), // Unique for upsert by phone
+  isDefault: integer('is_default', { mode: 'boolean' }),
+  isDisabled: integer('is_disabled', { mode: 'boolean' }),
+  vatNumber: text('vat_number'),
+  addressLine1: text('address_line_1'),
+  addressLine2: text('address_line_2'),
+  buildingNo: text('building_no'),
+  poBoxNo: text('po_box_no'),
+  city: text('city'),
+  company: text('company'),
+  customerGroup: text('customer_group'),
+  customerRegistrationNo: text('customer_registration_no'),
+  customerRegistrationType: text('customer_registration_type'),
+  // Sync status: 'pending' | 'synced' | 'failed'
+  syncStatus: text('sync_status').default('synced'),
+});
+
 // Category table
 export const categories = sqliteTable('Category', {
   id: text('id').primaryKey(),
