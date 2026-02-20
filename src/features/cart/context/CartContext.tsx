@@ -1,15 +1,15 @@
-import { Product } from '@/src/features/products/types';
+import { ProductWithUom } from '@/src/features/products/types';
 import React, { createContext, ReactNode, useContext, useState } from 'react';
 import { CartItem } from '../types';
 
 interface CartContextType {
     cartItems: CartItem[];
-    addToCart: (product: Product) => void;
+    addToCart: (product: ProductWithUom) => void;
     removeFromCart: (index: number) => void;
     updateQuantity: (index: number, delta: number) => void;
     clearCart: () => void;
     getSubtotal: () => number;
-    getTax: () => number;
+    getDiscount: () => number;
     getTotal: () => number;
 }
 
@@ -18,10 +18,10 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 export function CartProvider({ children }: { children: ReactNode }) {
     const [cartItems, setCartItems] = useState<CartItem[]>([]);
 
-    const addToCart = (product: Product) => {
+    const addToCart = (product: ProductWithUom) => {
         setCartItems((currentItems) => {
             const existingIndex = currentItems.findIndex(
-                (item) => item.product.item_code === product.item_code
+                (item) => item.product.itemCode === product.itemCode && item.product.uomId === product.uomId
             );
             if (existingIndex >= 0) {
                 const newItems = [...currentItems];
@@ -64,15 +64,18 @@ export function CartProvider({ children }: { children: ReactNode }) {
     };
 
     const getSubtotal = () => {
-        return cartItems.reduce((sum, item) => sum + item.product.rate * item.quantity, 0);
+        return cartItems.reduce((sum, item) => {
+            const rate = item.product.uomPrice ?? item.product.price ?? 0;
+            return sum + rate * item.quantity;
+        }, 0);
     };
 
-    const getTax = () => {
-        return getSubtotal() * 0.15; // 15% VAT
+    const getDiscount = () => {
+        return 0; // Discount logic to be implemented
     };
 
     const getTotal = () => {
-        return getSubtotal() + getTax();
+        return getSubtotal() - getDiscount();
     };
 
     return (
@@ -84,7 +87,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
                 updateQuantity,
                 clearCart,
                 getSubtotal,
-                getTax,
+                getDiscount,
                 getTotal,
             }}
         >

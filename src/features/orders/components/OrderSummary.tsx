@@ -13,9 +13,12 @@ interface OrderSummaryProps {
 }
 
 export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onCheckout, showActions = true }: OrderSummaryProps) {
-  const subtotal = cartItems.reduce((sum, item) => sum + item.product.rate * item.quantity, 0);
-  const tax = subtotal * 0.15; // Assuming 15% VAT
-  const total = subtotal + tax;
+  const subtotal = cartItems.reduce((sum, item) => {
+    const rate = item.product.uomPrice ?? item.product.price ?? 0;
+    return sum + rate * item.quantity;
+  }, 0);
+  const discount = 0; // Discount logic to be implemented
+  const total = subtotal - discount;
 
   return (
     // <View className="flex-col h-full bg-white border-l border-gray-200">
@@ -106,21 +109,21 @@ export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onChec
         ) : (
           cartItems.map((item, index) => (
             <View
-              key={`${item.product.item_code}-${index}`}
+              key={`${item.product.itemCode}-${item.product.uomId}-${index}`}
               className="flex-row items-center justify-between mb-4 bg-gray-50 p-3 rounded-lg">
               <View className="flex-1 pr-2">
                 <Text className="text-sm font-medium text-gray-800" numberOfLines={1}>
-                  {item.product.item_name}
+                  {item.product.name}
                 </Text>
-                <Text className="text-xs text-gray-500">{item.product.item_code}</Text>
+                <Text className="text-xs text-gray-500">{item.product.itemCode}</Text>
                 <Text className="text-sm text-gray-600 mt-1">
-                  {item.product.rate} {item.product.currency}
+                  {item.product.uomPrice ?? item.product.price ?? 0} SAR ({item.product.uom || 'Piece'})
                 </Text>
               </View>
 
               <View className="items-end gap-2">
                 <Text className="text-sm font-bold">
-                  {(item.product.rate * item.quantity).toFixed(2)}
+                  {((item.product.uomPrice ?? item.product.price ?? 0) * item.quantity).toFixed(2)}
                 </Text>
 
                 <View className="flex-row items-center bg-white rounded-lg border border-gray-200 p-1">
@@ -150,8 +153,8 @@ export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onChec
           <Text className="font-medium">{subtotal.toFixed(2)}</Text>
         </View>
         <View className="flex-row justify-between mb-4">
-          <Text className="text-gray-500">Tax (15%)</Text>
-          <Text className="font-medium">{tax.toFixed(2)}</Text>
+          <Text className="text-gray-500">Discount</Text>
+          <Text className="font-medium text-red-500">-{discount.toFixed(2)}</Text>
         </View>
         <View className="flex-row justify-between mb-6 pt-4 border-t border-gray-200">
           <Text className="text-lg font-bold">Total</Text>

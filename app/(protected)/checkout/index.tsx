@@ -1,13 +1,14 @@
 import { useCart } from '@/src/features/cart/context/CartContext';
 import { AddCustomerModal } from '@/src/features/customers/components/AddCustomerModal';
 import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
+import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
-type PaymentMethod = 'Card' | 'Cash' | 'Mobile';
+type PaymentMethod = 'Cash/Card' | 'Cash' | 'Card';
 
 interface SelectedCustomer {
     id: string;
@@ -20,8 +21,11 @@ export default function CheckoutPage() {
     const { cartItems, removeFromCart, updateQuantity, clearCart, getTotal } = useCart();
     const { data: customers } = useCustomers();
 
-    const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('Card');
+    const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('Cash');
+    const [cashAmount, setCashAmount] = useState<string>('');
+    const [cardAmount, setCardAmount] = useState<string>('');
     const [isAddCustomerModalVisible, setIsAddCustomerModalVisible] = useState(false);
+    const [isCashModalVisible, setIsCashModalVisible] = useState(false);
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState<SelectedCustomer | null>(null);
     const [customerSearch, setCustomerSearch] = useState('');
@@ -37,6 +41,28 @@ export default function CheckoutPage() {
         );
     }, [customers, customerSearch]);
 
+    const total = getTotal();
+
+    // Auto-calculate card amount when cash amount or total changes
+    useEffect(() => {
+        if (selectedPaymentMethod === 'Cash/Card') {
+            const cash = parseFloat(cashAmount) || 0;
+            const remaining = Math.max(0, total - cash);
+            setCardAmount(remaining.toFixed(2));
+        }
+    }, [cashAmount, total, selectedPaymentMethod]);
+
+    // Reset split amounts when switching away from Cash/Card
+    useEffect(() => {
+        if (selectedPaymentMethod !== 'Cash/Card') {
+            setCashAmount('');
+            setCardAmount('');
+        } else {
+            setCashAmount('');
+            setCardAmount(total.toFixed(2));
+        }
+    }, [selectedPaymentMethod]);
+
     const handleSelectCustomer = (customer: SelectedCustomer) => {
         setSelectedCustomer(customer);
         setIsDropdownOpen(false);
@@ -44,12 +70,19 @@ export default function CheckoutPage() {
     };
 
     const handleCompletePayment = () => {
-        console.log('Complete Payment', {
+        const paymentDetails: any = {
             paymentMethod: selectedPaymentMethod,
             customer: selectedCustomer,
-            total: getTotal(),
+            total: total,
             items: cartItems,
-        });
+        };
+
+        if (selectedPaymentMethod === 'Cash/Card') {
+            paymentDetails.cashAmount = parseFloat(cashAmount) || 0;
+            paymentDetails.cardAmount = parseFloat(cardAmount) || 0;
+        }
+
+        console.log('Complete Payment', paymentDetails);
         alert('Payment Completed! (Mock)');
         clearCart();
         router.replace('/');
@@ -62,7 +95,7 @@ export default function CheckoutPage() {
     };
 
     return (
-        <View className="flex-1 flex-row bg-gray-50">
+        <View className="flex-1 flex-row bg-gray-50 ">
             {/* Left Column: Actions */}
             <ScrollView className="flex-1 p-6">
                 <View>
@@ -136,8 +169,8 @@ export default function CheckoutPage() {
                                                     })
                                                 }
                                                 className={`flex-row items-center px-4 py-3 border-b border-gray-50 ${selectedCustomer?.id === customer.id
-                                                        ? 'bg-green-50'
-                                                        : ''
+                                                    ? 'bg-green-50'
+                                                    : ''
                                                     }`}
                                             >
                                                 <View className="w-8 h-8 rounded-full bg-gray-100 items-center justify-center mr-3">
@@ -183,15 +216,20 @@ export default function CheckoutPage() {
                     {/* Payment Method Section */}
                     <View>
                         <Text className="text-gray-600 font-medium mb-3">Select Payment Method</Text>
-                        <View className="gap-3">
+                        <View className="flex-row gap-3">
                             <PaymentMethodOption
-                                icon="card-outline"
-                                title="Card Payment"
-                                subtitle="Process payment using credit or debit card"
-                                isSelected={selectedPaymentMethod === 'Card'}
-                                onPress={() => setSelectedPaymentMethod('Card')}
-                                color="#3b82f6"
-                                bgIcon="bg-blue-100"
+                                icon="wallet-outline"
+                                title="Cash/Card"
+                                subtitle="Split payment between cash and card"
+                                isSelected={selectedPaymentMethod === 'Cash/Card'}
+                                onPress={() => {
+                                    if (selectedPaymentMethod !== 'Cash/Card') {
+                                        setSelectedPaymentMethod('Cash/Card');
+                                        setIsCashModalVisible(true);
+                                    }
+                                }}
+                                color="#f59e0b"
+                                bgIcon="bg-amber-100"
                             />
                             <PaymentMethodOption
                                 icon="cash-outline"
@@ -203,15 +241,43 @@ export default function CheckoutPage() {
                                 bgIcon="bg-green-100"
                             />
                             <PaymentMethodOption
-                                icon="phone-portrait-outline"
-                                title="Mobile Payment"
-                                subtitle="Process payment using mobile wallet"
-                                isSelected={selectedPaymentMethod === 'Mobile'}
-                                onPress={() => setSelectedPaymentMethod('Mobile')}
-                                color="#a855f7"
-                                bgIcon="bg-purple-100"
+                                icon="card-outline"
+                                title="Card Payment"
+                                subtitle="Process payment using credit or debit card"
+                                isSelected={selectedPaymentMethod === 'Card'}
+                                onPress={() => setSelectedPaymentMethod('Card')}
+                                color="#3b82f6"
+                                bgIcon="bg-blue-100"
                             />
                         </View>
+
+                        {/* Cash/Card Split Amount Inputs */}
+                        {selectedPaymentMethod === 'Cash/Card' && (
+                            <View className="mt-4 bg-white border border-gray-200 rounded-xl p-4 gap-4">
+                                <Text className="text-gray-700 font-semibold text-sm">Split Payment Amounts</Text>
+                                <View className="flex-row gap-4">
+                                    <View className="flex-1">
+                                        <Text className="text-gray-500 text-xs mb-1">Cash Amount</Text>
+                                        <TouchableOpacity
+                                            onPress={() => setIsCashModalVisible(true)}
+                                            className="bg-gray-50 border border-gray-200 rounded-lg p-3"
+                                        >
+                                            <Text className={`font-medium text-base ${cashAmount ? 'text-gray-800' : 'text-gray-400'}`}>
+                                                {cashAmount || '0.00'}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                    <View className="flex-1">
+                                        <Text className="text-gray-500 text-xs mb-1">Card Amount</Text>
+                                        <View className="bg-gray-100 border border-gray-200 rounded-lg p-3">
+                                            <Text className="text-gray-800 font-medium text-base">
+                                                {cardAmount || '0.00'}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                </View>
+                            </View>
+                        )}
                     </View>
                 </View>
             </ScrollView>
@@ -264,6 +330,13 @@ export default function CheckoutPage() {
                     // After creating a new customer, the useCustomers query will refetch
                 }}
             />
+            <CashAmountModal
+                visible={isCashModalVisible}
+                onClose={() => setIsCashModalVisible(false)}
+                onSubmit={(amount) => setCashAmount(amount)}
+                totalAmount={total}
+                initialAmount={cashAmount}
+            />
         </View>
     );
 }
@@ -288,19 +361,21 @@ function PaymentMethodOption({
     return (
         <TouchableOpacity
             onPress={onPress}
-            className={`flex-row items-center p-4 rounded-xl border ${isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'
+            className={`flex-1 p-4 rounded-xl border ${isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'
                 }`}
         >
-            <View className={`w-12 h-12 rounded-full items-center justify-center mr-4 ${bgIcon}`}>
-                <Ionicons name={icon} size={24} color={color} />
+            <View className="flex-row justify-between items-start mb-3">
+                <View className={`w-12 h-12 rounded-full items-center justify-center ${bgIcon}`}>
+                    <Ionicons name={icon} size={24} color={color} />
+                </View>
+                {isSelected && (
+                    <Ionicons name="checkmark-circle" size={24} color="#22c55e" />
+                )}
             </View>
-            <View className="flex-1">
-                <Text className="text-gray-800 font-bold text-base">{title}</Text>
-                <Text className="text-gray-500 text-sm">{subtitle}</Text>
+            <View>
+                <Text className="text-gray-800 font-bold text-base mb-1">{title}</Text>
+                <Text className="text-gray-500 text-xs">{subtitle}</Text>
             </View>
-            {isSelected && (
-                <Ionicons name="checkmark-circle" size={24} color="#22c55e" />
-            )}
         </TouchableOpacity>
     );
 }

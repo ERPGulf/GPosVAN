@@ -1,2 +1,2 @@
-// Re-export Product type for easier imports
-export { MOCK_PRODUCTS, Product } from './product.types';
+// Re-export Product types for easier imports
+export type { ProductWithUom } from './product.types';

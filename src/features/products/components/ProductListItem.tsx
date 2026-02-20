@@ -1,17 +1,17 @@
+import { ProductWithUom } from '@/src/features/products/types/product.types';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
-import { Product } from '../types';
 
 interface ProductListItemProps {
-  product: Product;
-  onPress: (product: Product) => void;
+  product: ProductWithUom;
+  onPress: (product: ProductWithUom) => void;
 }
 
 export function ProductListItem({ product, onPress }: ProductListItemProps) {
-  const stockQty = product.actual_qty ?? 0;
-  const isInStock = stockQty > 0;
-  const stockUom = product.stock_uom || 'Piece';
+  // Use UOM price if available, fallback to product base price
+  const rate = product.uomPrice ?? product.price ?? 0;
+  const uomName = product.uom || 'Piece';
 
   return (
     <TouchableOpacity
@@ -22,41 +22,28 @@ export function ProductListItem({ product, onPress }: ProductListItemProps) {
       {/* Column 1: Item Details */}
       <View className="w-[250px] pr-3">
         <Text className="text-sm font-semibold text-gray-800 mb-0.5" numberOfLines={1}>
-          {product.item_name || 'Unnamed Product'}
+          {product.name || 'Unnamed Product'}
         </Text>
-        {product.manufacturer_part_no ? (
+        {product.localizedEnglishName ? (
           <Text className="text-xs text-gray-500 mb-1" numberOfLines={1}>
-            Part #: {product.manufacturer_part_no}
+            {product.localizedEnglishName}
           </Text>
-        ) : null}
-        {product.description ? (
-          <Text className="text-xs text-gray-500 mb-1" numberOfLines={1}>
-            {product.description}
-          </Text>
-        ) : null}
-        {product.brand ? (
-          <View className="bg-gray-100 rounded px-2 py-0.5 self-start">
-            <Text className="text-[10px] text-gray-600 font-medium">{product.brand}</Text>
-          </View>
         ) : null}
       </View>
 
       {/* Column 2: Rate */}
       <View className="w-[90px] items-start pl-1">
         <Text className="text-sm font-semibold text-gray-800">
-          {(product.rate ?? 0).toFixed(0)}{' '}
-          <Text className="text-xs font-normal text-gray-500">{product.currency || 'SAR'}</Text>
+          {rate.toFixed(0)}{' '}
+          <Text className="text-xs font-normal text-gray-500">SAR</Text>
         </Text>
       </View>
 
-      {/* Column 3: Stock */}
+      {/* Column 3: UOM */}
       <View className="w-[90px] items-start pl-3">
-        <View className={`rounded px-2.5 py-1 items-center min-w-[50px] ${isInStock ? 'bg-green-100' : 'bg-red-100'}`}>
-          <Text className={`text-[13px] font-semibold ${isInStock ? 'text-green-700' : 'text-red-600'}`}>
-            {stockQty}
-          </Text>
-          <Text className={`text-[10px] font-normal ml-0.5 ${isInStock ? 'text-green-700' : 'text-red-600'}`}>
-            {stockUom}
+        <View className="rounded px-2.5 py-1 items-center min-w-[50px] bg-gray-100">
+          <Text className="text-[13px] font-semibold text-gray-700">
+            {uomName}
           </Text>
         </View>
       </View>
@@ -64,11 +51,9 @@ export function ProductListItem({ product, onPress }: ProductListItemProps) {
       {/* Column 4: Item Code */}
       <View className="w-[140px] pl-4">
         <Text className="text-xs text-gray-600 font-mono" numberOfLines={1}>
-          {product.item_code || '-'}
+          {product.itemCode || '-'}
         </Text>
       </View>
-
-
 
       {/* Add Button */}
       <View className="w-[50px] items-center justify-center">

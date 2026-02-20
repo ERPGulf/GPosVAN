@@ -1,11 +1,11 @@
+import { ProductWithUom } from '@/src/features/products/types/product.types';
 import React from 'react';
 import { FlatList, Text, View } from 'react-native';
-import { Product } from '../types';
 import { ProductListItem } from './ProductListItem';
 
 interface ProductListProps {
-  products: Product[];
-  onAddToCart: (product: Product) => void;
+  products: ProductWithUom[];
+  onAddToCart: (product: ProductWithUom) => void;
 }
 
 export function ProductList({ products, onAddToCart }: ProductListProps) {
@@ -20,7 +20,7 @@ export function ProductList({ products, onAddToCart }: ProductListProps) {
           <Text className="text-[11px] font-semibold text-gray-400 tracking-[0.5px]">RATE</Text>
         </View>
         <View className="w-[90px] items-start pl-3">
-          <Text className="text-[11px] font-semibold text-gray-400 tracking-[0.5px]">STOCK</Text>
+          <Text className="text-[11px] font-semibold text-gray-400 tracking-[0.5px]">UOM</Text>
         </View>
         <View className="w-[140px] pl-4">
           <Text className="text-[11px] font-semibold text-gray-400 tracking-[0.5px]">ITEM CODE</Text>
@@ -34,7 +34,7 @@ export function ProductList({ products, onAddToCart }: ProductListProps) {
       {/* Product List */}
       <FlatList
         data={products}
-        keyExtractor={(item, index) => item.item_code || `product-${index}`}
+        keyExtractor={(item, index) => `${item.id}-${item.uomId || index}`}
         renderItem={({ item }) => (
           <ProductListItem product={item} onPress={onAddToCart} />
         )}
