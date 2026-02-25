@@ -1,7 +1,8 @@
-import { useCart } from '@/src/features/cart/context/CartContext';
+import { addToCart, removeFromCart, selectCartItems, updateQuantity } from '@/src/features/cart/cartSlice';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
 import { ProductList } from '@/src/features/products/components/ProductList';
 import { useBarcodes, useCategories, useProducts } from '@/src/features/products/hooks/useProducts';
+import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
@@ -11,8 +12,8 @@ import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View 
 export default function App() {
     const { data: dbProducts, isLoading, error } = useProducts();
     const { data: categories } = useCategories();
-    // const [cartItems, setCartItems] = useState<CartItem[]>([]); // Removed local state
-    const { cartItems, addToCart, removeFromCart, updateQuantity } = useCart(); // Use global context
+    const dispatch = useAppDispatch();
+    const cartItems = useAppSelector(selectCartItems);
     const router = useRouter();
 
     const [searchQuery, setSearchQuery] = useState('');
@@ -130,7 +131,7 @@ export default function App() {
                         </Text>
                     </View>
                 ) : (
-                    <ProductList products={filteredProducts} onAddToCart={addToCart} />
+                    <ProductList products={filteredProducts} onAddToCart={(product) => dispatch(addToCart(product))} />
                 )}
             </View>
 
@@ -138,8 +139,8 @@ export default function App() {
             <View className="w-1/3 h-full shadow-xl">
                 <OrderSummary
                     cartItems={cartItems}
-                    onRemoveItem={removeFromCart}
-                    onUpdateQuantity={updateQuantity}
+                    onRemoveItem={(index) => dispatch(removeFromCart(index))}
+                    onUpdateQuantity={(index, delta) => dispatch(updateQuantity({ index, delta }))}
                     onCheckout={() => router.push('/checkout')}
                 />
             </View>
