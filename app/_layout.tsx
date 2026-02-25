@@ -1,7 +1,7 @@
-import { AuthProvider } from '@/src/features/auth';
 import { pushPendingCustomers, syncAllCustomers } from '@/src/infrastructure/db/customers.repository';
 import migrations from '@/src/infrastructure/db/migrations/migrations';
 import { syncAllProducts } from '@/src/infrastructure/db/products.repository';
+import { persistor, store } from '@/src/store/store';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { useMigrations } from 'drizzle-orm/expo-sqlite/migrator';
@@ -10,6 +10,8 @@ import { openDatabaseSync, SQLiteProvider } from 'expo-sqlite';
 import { Suspense, useEffect } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Provider } from 'react-redux';
+import { PersistGate } from 'redux-persist/integration/react';
 import './global.css';
 
 
@@ -78,21 +80,23 @@ export default function RootLayout() {
 
 
   return (
-    <AuthProvider>
-      <QueryClientProvider client={queryClient}>
-        <Suspense fallback={<ActivityIndicator size="large" color="#22c55e" />}>
-          <SQLiteProvider
-            databaseName="van_pos.db"
-            options={{ enableChangeListener: true }}
-            useSuspense
-          >
-            <SafeAreaView className="flex-1 bg-gray-50">
-              <Slot />
-            </SafeAreaView>
-          </SQLiteProvider>
-        </Suspense>
-      </QueryClientProvider>
-    </AuthProvider>
+    <Provider store={store}>
+      <PersistGate loading={<ActivityIndicator size="large" color="#22c55e" />} persistor={persistor}>
+        <QueryClientProvider client={queryClient}>
+          <Suspense fallback={<ActivityIndicator size="large" color="#22c55e" />}>
+            <SQLiteProvider
+              databaseName="van_pos.db"
+              options={{ enableChangeListener: true }}
+              useSuspense
+            >
+              <SafeAreaView className="flex-1 bg-gray-50">
+                <Slot />
+              </SafeAreaView>
+            </SQLiteProvider>
+          </Suspense>
+        </QueryClientProvider>
+      </PersistGate>
+    </Provider>
   );
 }
 

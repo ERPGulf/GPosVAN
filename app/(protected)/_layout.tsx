@@ -1,27 +1,18 @@
-import { useAuth } from '@/src/features/auth';
-import { CartProvider } from '@/src/features/cart/context/CartContext';
+import { selectIsAuthenticated } from '@/src/features/auth/authSlice';
 import { Sidebar } from '@/src/shared/components/Sidebar';
 import { TopBar } from '@/src/shared/components/TopBar';
+import { useAppSelector } from '@/src/store/hooks';
 import { Redirect, Slot } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { View } from 'react-native';
 
 export default function ProtectedLayout() {
-    const { isAuthenticated, isLoading } = useAuth();
+    const isAuthenticated = useAppSelector(selectIsAuthenticated);
     const [isSidebarVisible, setIsSidebarVisible] = useState(true);
 
     const toggleSidebar = () => {
         setIsSidebarVisible(!isSidebarVisible);
     };
-
-    // Show loading while checking auth status
-    if (isLoading) {
-        return (
-            <View className="flex-1 items-center justify-center bg-gray-50">
-                <ActivityIndicator size="large" color="#22c55e" />
-            </View>
-        );
-    }
 
     // Redirect to login if not authenticated
     if (!isAuthenticated) {
@@ -29,16 +20,14 @@ export default function ProtectedLayout() {
     }
 
     return (
-        <CartProvider>
-            <View className="flex-1 flex-row bg-white">
-                {isSidebarVisible && <Sidebar onToggle={toggleSidebar} />}
-                <View className="flex-1 flex-col">
-                    <TopBar onToggleSidebar={toggleSidebar} isSidebarVisible={isSidebarVisible} />
-                    <View className="flex-1 bg-gray-50">
-                        <Slot />
-                    </View>
+        <View className="flex-1 flex-row bg-white">
+            {isSidebarVisible && <Sidebar onToggle={toggleSidebar} />}
+            <View className="flex-1 flex-col">
+                <TopBar onToggleSidebar={toggleSidebar} isSidebarVisible={isSidebarVisible} />
+                <View className="flex-1 bg-gray-50">
+                    <Slot />
                 </View>
             </View>
-        </CartProvider>
+        </View>
     );
 }

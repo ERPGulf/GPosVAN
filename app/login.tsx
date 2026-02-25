@@ -1,6 +1,8 @@
-import { useAuth, useUsers } from '@/src/features/auth';
+import { useUsers } from '@/src/features/auth';
+import { login } from '@/src/features/auth/authSlice';
 import * as schema from '@/src/infrastructure/db/schema';
 import { authenticateUser } from '@/src/infrastructure/db/users.repository';
+import { useAppDispatch } from '@/src/store/hooks';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { useDrizzleStudio } from 'expo-drizzle-studio-plugin';
@@ -33,7 +35,7 @@ export default function LoginScreen() {
   const drizzleDb = drizzle(db, { schema });
   useDrizzleStudio(db);
   const router = useRouter();
-  const { login } = useAuth();
+  const dispatch = useAppDispatch();
 
   // Sync offline users from API
   const { isLoading: isSyncingUsers } = useUsers();
@@ -61,8 +63,9 @@ export default function LoginScreen() {
       const result = await authenticateUser(drizzleDb, data.username, data.password);
 
       if (result.success && result.user) {
-        // Store user in AsyncStorage via AuthContext
-        await login(result.user);
+        // Strip password before storing in Redux (persisted automatically via redux-persist)
+        const { password: _, ...userWithoutPassword } = result.user;
+        dispatch(login(userWithoutPassword));
         // Navigate to protected area after successful login
         router.replace('/(protected)');
       } else {

@@ -1,8 +1,9 @@
-import { useCart } from '@/src/features/cart/context/CartContext';
+import { clearCart, removeFromCart, selectCartItems, selectTotal, updateQuantity } from '@/src/features/cart/cartSlice';
 import { AddCustomerModal } from '@/src/features/customers/components/AddCustomerModal';
 import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
+import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -18,7 +19,9 @@ interface SelectedCustomer {
 
 export default function CheckoutPage() {
     const router = useRouter();
-    const { cartItems, removeFromCart, updateQuantity, clearCart, getTotal } = useCart();
+    const dispatch = useAppDispatch();
+    const cartItems = useAppSelector(selectCartItems);
+    const total = useAppSelector(selectTotal);
     const { data: customers } = useCustomers();
 
     const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>('Cash');
@@ -41,7 +44,7 @@ export default function CheckoutPage() {
         );
     }, [customers, customerSearch]);
 
-    const total = getTotal();
+
 
     // Auto-calculate card amount when cash amount or total changes
     useEffect(() => {
@@ -84,13 +87,13 @@ export default function CheckoutPage() {
 
         console.log('Complete Payment', paymentDetails);
         alert('Payment Completed! (Mock)');
-        clearCart();
+        dispatch(clearCart());
         router.replace('/');
     };
 
     const handleSaveAndClear = () => {
         console.log('Save and Clear');
-        clearCart();
+        dispatch(clearCart());
         router.replace('/');
     };
 
@@ -287,8 +290,8 @@ export default function CheckoutPage() {
                 <View className="flex-1">
                     <OrderSummary
                         cartItems={cartItems}
-                        onRemoveItem={removeFromCart}
-                        onUpdateQuantity={updateQuantity}
+                        onRemoveItem={(index) => dispatch(removeFromCart(index))}
+                        onUpdateQuantity={(index, delta) => dispatch(updateQuantity({ index, delta }))}
                         onCheckout={() => { }}
                         showActions={false}
                     />
