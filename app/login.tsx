@@ -90,8 +90,7 @@ export default function LoginScreen() {
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      className="flex-1"
-    >
+      className="flex-1">
       <View className="flex-1 items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 px-6">
         {/* Login Card */}
         <View className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
@@ -119,8 +118,9 @@ export default function LoginScreen() {
               name="username"
               render={({ field: { onChange, onBlur, value } }) => (
                 <TextInput
-                  className={`w-full px-4 py-3 bg-gray-50 border rounded-xl text-gray-800 text-base ${errors.username ? 'border-red-400' : 'border-gray-200'
-                    }`}
+                  className={`w-full px-4 py-3 bg-gray-50 border rounded-xl text-gray-800 text-base ${
+                    errors.username ? 'border-red-400' : 'border-gray-200'
+                  }`}
                   placeholder="Enter your username"
                   placeholderTextColor="#9ca3af"
                   onBlur={onBlur}
@@ -144,8 +144,9 @@ export default function LoginScreen() {
               name="password"
               render={({ field: { onChange, onBlur, value } }) => (
                 <TextInput
-                  className={`w-full px-4 py-3 bg-gray-50 border rounded-xl text-gray-800 text-base ${errors.password ? 'border-red-400' : 'border-gray-200'
-                    }`}
+                  className={`w-full px-4 py-3 bg-gray-50 border rounded-xl text-gray-800 text-base ${
+                    errors.password ? 'border-red-400' : 'border-gray-200'
+                  }`}
                   placeholder="Enter your password"
                   placeholderTextColor="#9ca3af"
                   onBlur={onBlur}
@@ -166,9 +167,9 @@ export default function LoginScreen() {
           <TouchableOpacity
             onPress={handleSubmit(onSubmit)}
             disabled={isLoading}
-            className={`w-full py-4 rounded-xl items-center justify-center shadow-lg ${isLoading ? 'bg-green-400' : 'bg-green-500'
-              }`}
-          >
+            className={`w-full py-4 rounded-xl items-center justify-center shadow-lg ${
+              isLoading ? 'bg-green-400' : 'bg-green-500'
+            }`}>
             {isLoading ? (
               <ActivityIndicator color="white" />
             ) : (
