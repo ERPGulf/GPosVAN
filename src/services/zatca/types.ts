@@ -5,14 +5,30 @@ export interface InvoiceItem {
 }
 
 export interface Invoice {
-  sellerName: string;
-  vatNumber: string;
-  invoiceNumber: string;
-  timestamp: string;
-  items: InvoiceItem[];
-  discount?: number;
-}
+  uuid: string;
 
+  invoiceNumber: string;
+
+  issueDate: string;
+
+  issueTime: string;
+
+  timestamp: string;
+
+  sellerName: string;
+
+  vatNumber: string;
+
+  customerName: string;
+
+  previousInvoiceHash?: string;
+
+  items: InvoiceItem[];
+
+  discount?: number;
+
+  currency?: string;
+}
 export interface InvoiceTotals {
   total: number;
   vat: number;

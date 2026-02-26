@@ -34,5 +34,5 @@ export function buildQRPayload(data: {
     offset += tag.length;
   });
 
-  return btoa(String.fromCharCode(...merged));
+  return Buffer.from(merged).toString('base64');
 }
