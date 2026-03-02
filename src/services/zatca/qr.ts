@@ -1,5 +1,23 @@
 import { encodeTLV } from './tlv';
 
+const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/** Pure-JS Uint8Array → base64 (no Buffer needed). */
+function uint8ToBase64(bytes: Uint8Array): string {
+  let result = '';
+  const len = bytes.length;
+  for (let i = 0; i < len; i += 3) {
+    const b0 = bytes[i];
+    const b1 = i + 1 < len ? bytes[i + 1] : 0;
+    const b2 = i + 2 < len ? bytes[i + 2] : 0;
+    result += CHARS[b0 >> 2];
+    result += CHARS[((b0 & 3) << 4) | (b1 >> 4)];
+    result += i + 1 < len ? CHARS[((b1 & 15) << 2) | (b2 >> 6)] : '=';
+    result += i + 2 < len ? CHARS[b2 & 63] : '=';
+  }
+  return result;
+}
+
 export function buildQRPayload(data: {
   sellerName: string;
   vatNumber: string;
@@ -34,5 +52,5 @@ export function buildQRPayload(data: {
     offset += tag.length;
   });
 
-  return Buffer.from(merged).toString('base64');
+  return uint8ToBase64(merged);
 }

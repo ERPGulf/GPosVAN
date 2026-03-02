@@ -1,125 +1,105 @@
-import { create } from 'xmlbuilder2';
 import { Invoice, InvoiceItem } from './types';
+
+/**
+ * Escape special XML characters in a string.
+ */
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
 
 export function buildInvoiceXML(invoice: Invoice): string {
   const currency = invoice.currency ?? 'SAR';
 
   const subtotal = invoice.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-
   const vat = subtotal * 0.15;
-
   const total = subtotal + vat;
 
-  const doc = create({ version: '1.0', encoding: 'UTF-8' }).ele('Invoice', {
-    xmlns: 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2',
-    'xmlns:cac': 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2',
-    'xmlns:cbc': 'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2',
-    'xmlns:ext': 'urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2',
-  });
+  // Build invoice lines
+  const invoiceLines = invoice.items
+    .map((item, i) => {
+      const lineTotal = item.price * item.quantity;
+      const itemTax = lineTotal * 0.15;
+      return (
+        `<cac:InvoiceLine>` +
+        `<cbc:ID>${i + 1}</cbc:ID>` +
+        `<cbc:InvoicedQuantity>${item.quantity}</cbc:InvoicedQuantity>` +
+        `<cbc:LineExtensionAmount currencyID="${currency}">${lineTotal}</cbc:LineExtensionAmount>` +
+        `<cac:TaxTotal>` +
+        `<cbc:TaxAmount currencyID="${currency}">${itemTax.toFixed(2)}</cbc:TaxAmount>` +
+        `</cac:TaxTotal>` +
+        `<cac:Item>` +
+        `<cbc:Name>${escapeXml(item.name)}</cbc:Name>` +
+        `<cac:ClassifiedTaxCategory>` +
+        `<cbc:ID>S</cbc:ID>` +
+        `<cbc:Percent>15</cbc:Percent>` +
+        `<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>` +
+        `</cac:ClassifiedTaxCategory>` +
+        `</cac:Item>` +
+        `<cac:Price>` +
+        `<cbc:PriceAmount currencyID="${currency}">${item.price.toFixed(2)}</cbc:PriceAmount>` +
+        `</cac:Price>` +
+        `</cac:InvoiceLine>`
+      );
+    })
+    .join('');
 
-  // Basic invoice fields
+  const xml =
+    `<?xml version="1.0" encoding="UTF-8"?>` +
+    `<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"` +
+    ` xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"` +
+    ` xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2"` +
+    ` xmlns:ext="urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2">` +
+    `<cbc:ProfileID>reporting:1.0</cbc:ProfileID>` +
+    `<cbc:ID>${escapeXml(invoice.invoiceNumber)}</cbc:ID>` +
+    `<cbc:UUID>${escapeXml(invoice.uuid)}</cbc:UUID>` +
+    `<cbc:IssueDate>${escapeXml(invoice.issueDate)}</cbc:IssueDate>` +
+    `<cbc:IssueTime>${escapeXml(invoice.issueTime)}</cbc:IssueTime>` +
+    `<cbc:InvoiceTypeCode>388</cbc:InvoiceTypeCode>` +
+    // Supplier
+    `<cac:AccountingSupplierParty>` +
+    `<cac:Party>` +
+    `<cac:PartyLegalEntity>` +
+    `<cbc:RegistrationName>${escapeXml(invoice.sellerName)}</cbc:RegistrationName>` +
+    `</cac:PartyLegalEntity>` +
+    `<cac:PartyTaxScheme>` +
+    `<cbc:CompanyID>${escapeXml(invoice.vatNumber)}</cbc:CompanyID>` +
+    `<cac:TaxScheme><cbc:ID>VAT</cbc:ID></cac:TaxScheme>` +
+    `</cac:PartyTaxScheme>` +
+    `</cac:Party>` +
+    `</cac:AccountingSupplierParty>` +
+    // Customer
+    `<cac:AccountingCustomerParty>` +
+    `<cac:Party>` +
+    `<cac:PartyLegalEntity>` +
+    `<cbc:RegistrationName>${escapeXml(invoice.customerName ?? '')}</cbc:RegistrationName>` +
+    `</cac:PartyLegalEntity>` +
+    `</cac:Party>` +
+    `</cac:AccountingCustomerParty>` +
+    // Invoice lines
+    invoiceLines +
+    // Tax total
+    `<cac:TaxTotal>` +
+    `<cbc:TaxAmount currencyID="${currency}">${vat.toFixed(2)}</cbc:TaxAmount>` +
+    `</cac:TaxTotal>` +
+    // Monetary totals
+    `<cac:LegalMonetaryTotal>` +
+    `<cbc:LineExtensionAmount currencyID="${currency}">${subtotal.toFixed(2)}</cbc:LineExtensionAmount>` +
+    `<cbc:TaxExclusiveAmount currencyID="${currency}">${subtotal.toFixed(2)}</cbc:TaxExclusiveAmount>` +
+    `<cbc:TaxInclusiveAmount currencyID="${currency}">${total.toFixed(2)}</cbc:TaxInclusiveAmount>` +
+    `<cbc:PayableAmount currencyID="${currency}">${total.toFixed(2)}</cbc:PayableAmount>` +
+    `</cac:LegalMonetaryTotal>` +
+    `</Invoice>`;
 
-  doc.ele('cbc:ProfileID').txt('reporting:1.0');
-
-  doc.ele('cbc:ID').txt(invoice.invoiceNumber);
-
-  doc.ele('cbc:UUID').txt(invoice.uuid);
-
-  doc.ele('cbc:IssueDate').txt(invoice.issueDate);
-
-  doc.ele('cbc:IssueTime').txt(invoice.issueTime);
-
-  doc.ele('cbc:InvoiceTypeCode').txt('388');
-
-  // Supplier
-
-  const supplier = doc.ele('cac:AccountingSupplierParty');
-
-  const sParty = supplier.ele('cac:Party');
-
-  const sLegal = sParty.ele('cac:PartyLegalEntity');
-
-  sLegal.ele('cbc:RegistrationName').txt(invoice.sellerName);
-
-  // VAT number
-
-  const taxScheme = sParty.ele('cac:PartyTaxScheme');
-
-  taxScheme.ele('cbc:CompanyID').txt(invoice.vatNumber);
-
-  taxScheme.ele('cac:TaxScheme').ele('cbc:ID').txt('VAT');
-
-  // Customer
-
-  const customer = doc.ele('cac:AccountingCustomerParty');
-
-  const cParty = customer.ele('cac:Party');
-
-  const cLegal = cParty.ele('cac:PartyLegalEntity');
-
-  cLegal.ele('cbc:RegistrationName').txt(invoice.customerName ?? '');
-
-  // Invoice lines
-
-  invoice.items.forEach((item, i) => {
-    const line = doc.ele('cac:InvoiceLine');
-
-    line.ele('cbc:ID').txt(String(i + 1));
-
-    line.ele('cbc:InvoicedQuantity').txt(String(item.quantity));
-
-    line
-      .ele('cbc:LineExtensionAmount', {
-        currencyID: currency,
-      })
-      .txt(String(item.price * item.quantity));
-
-    const taxTotal = line.ele('cac:TaxTotal');
-
-    const itemTax = item.price * item.quantity * 0.15;
-
-    taxTotal.ele('cbc:TaxAmount', { currencyID: currency }).txt(itemTax.toFixed(2));
-
-    const itemNode = line.ele('cac:Item');
-
-    itemNode.ele('cbc:Name').txt(item.name);
-
-    const taxCategory = itemNode.ele('cac:ClassifiedTaxCategory');
-
-    taxCategory.ele('cbc:ID').txt('S');
-
-    taxCategory.ele('cbc:Percent').txt('15');
-
-    taxCategory.ele('cac:TaxScheme').ele('cbc:ID').txt('VAT');
-
-    const price = line.ele('cac:Price');
-
-    price.ele('cbc:PriceAmount', { currencyID: currency }).txt(item.price.toFixed(2));
-  });
-
-  // Tax total
-
-  const taxTotal = doc.ele('cac:TaxTotal');
-
-  taxTotal.ele('cbc:TaxAmount', { currencyID: currency }).txt(vat.toFixed(2));
-
-  // Monetary totals
-
-  const monetaryTotal = doc.ele('cac:LegalMonetaryTotal');
-
-  monetaryTotal.ele('cbc:LineExtensionAmount', { currencyID: currency }).txt(subtotal.toFixed(2));
-
-  monetaryTotal.ele('cbc:TaxExclusiveAmount', { currencyID: currency }).txt(subtotal.toFixed(2));
-
-  monetaryTotal.ele('cbc:TaxInclusiveAmount', { currencyID: currency }).txt(total.toFixed(2));
-
-  monetaryTotal.ele('cbc:PayableAmount', { currencyID: currency }).txt(total.toFixed(2));
-
-  return doc.end({ prettyPrint: false });
+  return xml;
 }
+
 export function calculateTotals(items: InvoiceItem[]) {
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-
   const vat = subtotal * 0.15;
 
   return {
