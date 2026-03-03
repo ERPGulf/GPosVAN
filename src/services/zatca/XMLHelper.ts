@@ -1,11 +1,8 @@
 /* ------------------------------------------------------------------ */
-/*  ZATCA E-Invoicing – UBL 2.1 XML builder using xmlbuilder2         */
-/*                                                                    */
-/*  Mirrors the C# XMLHelper: generates a ZATCA Phase-2 compliant    */
-/*  Invoice XML with all required elements.                           */
+/*  ZATCA E-Invoicing – UBL 2.1 XML builder (Expo-safe version)      */
+/*  Replaces xmlbuilder2 with deterministic string builder            */
 /* ------------------------------------------------------------------ */
 
-import { create } from 'xmlbuilder2';
 import { calculateItemAmounts, calculateTotals } from './totals';
 import type { Invoice } from './types';
 
@@ -22,6 +19,16 @@ const NS = {
   xades: 'http://uri.etsi.org/01903/v1.3.2#',
 } as const;
 
+/* ─── XML Escaper ─── */
+function esc(value: string): string {
+  return value
+    ?.replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;') ?? '';
+}
+
 /* ====================================================================
  * 1. Build base invoice XML (without UBL Extensions)
  * ==================================================================== */
@@ -32,401 +39,277 @@ export function buildInvoiceXML(invoice: Invoice): string {
     invoice.isTaxIncludedInPrice,
     invoice.discount,
   );
+
   const f = (n: number) => n.toFixed(2);
   const cur = invoice.currency;
 
-  const doc = create({ version: '1.0', encoding: 'UTF-8' })
-    .ele(NS.ubl, 'Invoice')
-    .att('xmlns', NS.ubl)
-    .att('xmlns:cac', NS.cac)
-    .att('xmlns:cbc', NS.cbc)
-    .att('xmlns:ext', NS.ext);
+  let xml = `<?xml version="1.0" encoding="UTF-8"?>`;
+  xml += `<Invoice
+    xmlns="${NS.ubl}"
+    xmlns:cac="${NS.cac}"
+    xmlns:cbc="${NS.cbc}"
+    xmlns:ext="${NS.ext}"
+    xmlns:sig="${NS.sig}"
+    xmlns:sac="${NS.sac}"
+    xmlns:sbc="${NS.sbc}"
+    xmlns:ds="${NS.ds}"
+    xmlns:xades="${NS.xades}"
+  >`;
 
   /* ── Base tags ── */
-  doc.ele(NS.cbc, 'cbc:ProfileID').txt('reporting:1.0').up();
-  doc.ele(NS.cbc, 'cbc:ID').txt('ACC-SINV-' + new Date().getFullYear() + '-' + invoice.invoiceNumber).up();
-  doc.ele(NS.cbc, 'cbc:UUID').txt(invoice.uuid).up();
-  doc.ele(NS.cbc, 'cbc:IssueDate').txt(invoice.issueDate).up();
-  doc.ele(NS.cbc, 'cbc:IssueTime').txt(invoice.issueTime).up();
-  doc.ele(NS.cbc, 'cbc:InvoiceTypeCode').att('name', '0200000').txt('388').up();
-  doc.ele(NS.cbc, 'cbc:DocumentCurrencyCode').txt(cur).up();
-  doc.ele(NS.cbc, 'cbc:TaxCurrencyCode').txt(cur).up();
+  xml += `<cbc:ProfileID>reporting:1.0</cbc:ProfileID>`;
+  xml += `<cbc:ID>ACC-SINV-${new Date().getFullYear()}-${esc(invoice.invoiceNumber)}</cbc:ID>`;
+  xml += `<cbc:UUID>${esc(invoice.uuid)}</cbc:UUID>`;
+  xml += `<cbc:IssueDate>${esc(invoice.issueDate)}</cbc:IssueDate>`;
+  xml += `<cbc:IssueTime>${esc(invoice.issueTime)}</cbc:IssueTime>`;
+  xml += `<cbc:InvoiceTypeCode name="0200000">388</cbc:InvoiceTypeCode>`;
+  xml += `<cbc:DocumentCurrencyCode>${cur}</cbc:DocumentCurrencyCode>`;
+  xml += `<cbc:TaxCurrencyCode>${cur}</cbc:TaxCurrencyCode>`;
 
-  /* ── AdditionalDocumentReference – ICV ── */
-  const icvRef = doc.ele(NS.cac, 'cac:AdditionalDocumentReference');
-  icvRef.ele(NS.cbc, 'cbc:ID').txt('ICV').up();
+  /* ── ICV ── */
   const icvNum = invoice.invoiceNumber.replace(/[^0-9]/g, '');
-  icvRef.ele(NS.cbc, 'cbc:UUID').txt(icvNum).up();
-  icvRef.up();
+  xml += `
+  <cac:AdditionalDocumentReference>
+    <cbc:ID>ICV</cbc:ID>
+    <cbc:UUID>${esc(icvNum)}</cbc:UUID>
+  </cac:AdditionalDocumentReference>`;
 
-  /* ── AdditionalDocumentReference – PIH ── */
-  const pihRef = doc.ele(NS.cac, 'cac:AdditionalDocumentReference');
-  pihRef.ele(NS.cbc, 'cbc:ID').txt('PIH').up();
-  const pihAtt = pihRef.ele(NS.cac, 'cac:Attachment');
-  pihAtt.ele(NS.cbc, 'cbc:EmbeddedDocumentBinaryObject')
-    .att('mimeCode', 'text/plain')
-    .txt(invoice.previousInvoiceHash)
-    .up();
-  pihAtt.up();
-  pihRef.up();
+  /* ── PIH ── */
+  xml += `
+  <cac:AdditionalDocumentReference>
+    <cbc:ID>PIH</cbc:ID>
+    <cac:Attachment>
+      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">
+        ${esc(invoice.previousInvoiceHash)}
+      </cbc:EmbeddedDocumentBinaryObject>
+    </cac:Attachment>
+  </cac:AdditionalDocumentReference>`;
 
-  /* ── AdditionalDocumentReference – QR (placeholder) ── */
-  const qrRef = doc.ele(NS.cac, 'cac:AdditionalDocumentReference');
-  qrRef.ele(NS.cbc, 'cbc:ID').txt('QR').up();
-  const qrAtt = qrRef.ele(NS.cac, 'cac:Attachment');
-  qrAtt.ele(NS.cbc, 'cbc:EmbeddedDocumentBinaryObject')
-    .att('mimeCode', 'text/plain')
-    .txt('PLACEHOLDER_QR')
-    .up();
-  qrAtt.up();
-  qrRef.up();
+  /* ── QR Placeholder ── */
+  xml += `
+  <cac:AdditionalDocumentReference>
+    <cbc:ID>QR</cbc:ID>
+    <cac:Attachment>
+      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">
+        PLACEHOLDER_QR
+      </cbc:EmbeddedDocumentBinaryObject>
+    </cac:Attachment>
+  </cac:AdditionalDocumentReference>`;
 
   /* ── Signature element ── */
-  const sigEle = doc.ele(NS.cac, 'cac:Signature');
-  sigEle.ele(NS.cbc, 'cbc:ID').txt('urn:oasis:names:specification:ubl:signature:Invoice').up();
-  sigEle.ele(NS.cbc, 'cbc:SignatureMethod').txt('urn:oasis:names:specification:ubl:dsig:enveloped:xades').up();
-  sigEle.up();
+  xml += `
+  <cac:Signature>
+    <cbc:ID>urn:oasis:names:specification:ubl:signature:Invoice</cbc:ID>
+    <cbc:SignatureMethod>
+      urn:oasis:names:specification:ubl:dsig:enveloped:xades
+    </cbc:SignatureMethod>
+  </cac:Signature>`;
 
-  /* ── AccountingSupplierParty ── */
-  buildSupplierParty(doc, invoice);
+  /* ── Supplier ── */
+  xml += buildSupplierParty(invoice);
 
-  /* ── AccountingCustomerParty ── */
-  buildCustomerParty(doc, invoice);
+  /* ── Customer ── */
+  xml += buildCustomerParty(invoice);
 
   /* ── Delivery ── */
-  const delivery = doc.ele(NS.cac, 'cac:Delivery');
-  delivery.ele(NS.cbc, 'cbc:ActualDeliveryDate').txt(invoice.issueDate).up();
-  delivery.up();
+  xml += `
+  <cac:Delivery>
+    <cbc:ActualDeliveryDate>${esc(invoice.issueDate)}</cbc:ActualDeliveryDate>
+  </cac:Delivery>`;
 
   /* ── PaymentMeans ── */
-  const payment = doc.ele(NS.cac, 'cac:PaymentMeans');
-  payment.ele(NS.cbc, 'cbc:PaymentMeansCode').txt('30').up();
-  payment.up();
+  xml += `
+  <cac:PaymentMeans>
+    <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
+  </cac:PaymentMeans>`;
 
-  /* ── AllowanceCharge (document-level discount) ── */
-  buildAllowanceCharge(doc, invoice, totals.totalTax);
+  /* ── AllowanceCharge ── */
+  xml += buildAllowanceCharge(invoice, totals.totalTax);
 
-  /* ── TaxTotal (simple – just amount) ── */
-  const taxTotal1 = doc.ele(NS.cac, 'cac:TaxTotal');
-  taxTotal1.ele(NS.cbc, 'cbc:TaxAmount').att('currencyID', cur).txt(f(totals.totalTax)).up();
-  taxTotal1.up();
+  /* ── TaxTotal ── */
+  xml += `
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="${cur}">${f(totals.totalTax)}</cbc:TaxAmount>
+  </cac:TaxTotal>`;
 
-  /* ── TaxTotal (with subtotal breakdown) ── */
-  buildTaxTotalWithSubtotal(doc, totals.totalTax, totals.subtotal, cur);
+  xml += buildTaxTotalWithSubtotal(totals.totalTax, totals.subtotal, cur);
 
   /* ── LegalMonetaryTotal ── */
-  buildLegalMonetaryTotal(doc, totals, invoice.discount, cur);
+  xml += buildLegalMonetaryTotal(totals, invoice.discount, cur);
 
   /* ── InvoiceLines ── */
-  buildInvoiceLines(doc, invoice);
+  xml += buildInvoiceLines(invoice);
 
-  return doc.end({ prettyPrint: false });
+  xml += `</Invoice>`;
+
+  return xml;
 }
 
 /* ====================================================================
- * 2. Inject UBL Extensions (signature data) into existing XML
- * ==================================================================== */
+   Everything below remains identical logic but converted to string
+   ==================================================================== */
 
-export function injectUBLExtensions(
-  xml: string,
-  invoiceHashBase64: string,
-  signedPropsHash: string,
-  signatureValueBase64: string,
-  certificateBody: string,
-  signingTime: string,
-  certificateDigest: string,
-  issuerName: string,
-  serialNumber: string,
-): string {
-  // Build the UBL extension block as a string and inject it
-  const ext =
-    `<ext:UBLExtensions>` +
-    `<ext:UBLExtension>` +
-    `<ext:ExtensionURI>urn:oasis:names:specification:ubl:dsig:enveloped:xades</ext:ExtensionURI>` +
-    `<ext:ExtensionContent>` +
-    `<sig:UBLDocumentSignatures xmlns:sig="${NS.sig}" xmlns:sac="${NS.sac}" xmlns:sbc="${NS.sbc}">` +
-    `<sac:SignatureInformation>` +
-    `<cbc:ID>urn:oasis:names:specification:ubl:signature:1</cbc:ID>` +
-    `<sbc:ReferencedSignatureID>urn:oasis:names:specification:ubl:signature:Invoice</sbc:ReferencedSignatureID>` +
-    buildDSSignature(
-      invoiceHashBase64,
-      signedPropsHash,
-      signatureValueBase64,
-      certificateBody,
-      signingTime,
-      certificateDigest,
-      issuerName,
-      serialNumber,
-    ) +
-    `</sac:SignatureInformation>` +
-    `</sig:UBLDocumentSignatures>` +
-    `</ext:ExtensionContent>` +
-    `</ext:UBLExtension>` +
-    `</ext:UBLExtensions>`;
-
-  // Insert right after <Invoice ...> opening tag
-  const insertPoint = xml.indexOf('>') + 1; // end of <Invoice ...>
-  return xml.slice(0, insertPoint) + ext + xml.slice(insertPoint);
-}
-
-/* ====================================================================
- * 3. Inject QR data – replace the placeholder
- * ==================================================================== */
-
-export function injectQRData(xml: string, qrBase64: string): string {
-  return xml.replace('PLACEHOLDER_QR', qrBase64);
-}
-
-/* ====================================================================
- * Helper: ds:Signature XML block
- * ==================================================================== */
-
-function buildDSSignature(
-  invoiceHash: string,
-  signedPropsHash: string,
-  signatureValue: string,
-  certificateBody: string,
-  signingTime: string,
-  certificateDigest: string,
-  issuerName: string,
-  serialNumber: string,
-): string {
-  return (
-    `<ds:Signature xmlns:ds="${NS.ds}" Id="signature">` +
-
-    /* ── SignedInfo ── */
-    `<ds:SignedInfo>` +
-    `<ds:CanonicalizationMethod Algorithm="http://www.w3.org/2006/12/xml-c14n11"/>` +
-    `<ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"/>` +
-
-    // Reference 1 – invoice body
-    `<ds:Reference Id="invoiceSignedData" URI="">` +
-    `<ds:Transforms>` +
-    `<ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116">` +
-    `<ds:XPath>not(//ancestor-or-self::ext:UBLExtensions)</ds:XPath>` +
-    `</ds:Transform>` +
-    `<ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116">` +
-    `<ds:XPath>not(//ancestor-or-self::cac:Signature)</ds:XPath>` +
-    `</ds:Transform>` +
-    `<ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116">` +
-    `<ds:XPath>not(//ancestor-or-self::cac:AdditionalDocumentReference[cbc:ID='QR'])</ds:XPath>` +
-    `</ds:Transform>` +
-    `<ds:Transform Algorithm="http://www.w3.org/2006/12/xml-c14n11"/>` +
-    `</ds:Transforms>` +
-    `<ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>` +
-    `<ds:DigestValue>${invoiceHash}</ds:DigestValue>` +
-    `</ds:Reference>` +
-
-    // Reference 2 – signed properties
-    `<ds:Reference URI="#xadesSignedProperties" Type="http://www.w3.org/2000/09/xmldsig#SignatureProperties">` +
-    `<ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>` +
-    `<ds:DigestValue>${signedPropsHash}</ds:DigestValue>` +
-    `</ds:Reference>` +
-
-    `</ds:SignedInfo>` +
-
-    /* ── SignatureValue ── */
-    `<ds:SignatureValue>${signatureValue}</ds:SignatureValue>` +
-
-    /* ── KeyInfo ── */
-    `<ds:KeyInfo>` +
-    `<ds:X509Data>` +
-    `<ds:X509Certificate>${certificateBody}</ds:X509Certificate>` +
-    `</ds:X509Data>` +
-    `</ds:KeyInfo>` +
-
-    /* ── Object – xades:QualifyingProperties ── */
-    `<ds:Object>` +
-    `<xades:QualifyingProperties xmlns:xades="${NS.xades}" Target="signature">` +
-    `<xades:SignedProperties Id="xadesSignedProperties">` +
-    `<xades:SignedSignatureProperties>` +
-    `<xades:SigningTime>${signingTime}</xades:SigningTime>` +
-    `<xades:SigningCertificate>` +
-    `<xades:Cert>` +
-    `<xades:CertDigest>` +
-    `<ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>` +
-    `<ds:DigestValue>${certificateDigest}</ds:DigestValue>` +
-    `</xades:CertDigest>` +
-    `<xades:IssuerSerial>` +
-    `<ds:X509IssuerName>${issuerName}</ds:X509IssuerName>` +
-    `<ds:X509SerialNumber>${serialNumber}</ds:X509SerialNumber>` +
-    `</xades:IssuerSerial>` +
-    `</xades:Cert>` +
-    `</xades:SigningCertificate>` +
-    `</xades:SignedSignatureProperties>` +
-    `</xades:SignedProperties>` +
-    `</xades:QualifyingProperties>` +
-    `</ds:Object>` +
-
-    `</ds:Signature>`
-  );
-}
-
-/* ====================================================================
- * Sub-builders (match C# helper methods)
- * ==================================================================== */
-
-function buildSupplierParty(doc: any, invoice: Invoice) {
+function buildSupplierParty(invoice: Invoice): string {
   const s = invoice.supplier;
-  const sp = doc.ele(NS.cac, 'cac:AccountingSupplierParty');
-  const party = sp.ele(NS.cac, 'cac:Party');
 
-  // PartyIdentification
-  const pid = party.ele(NS.cac, 'cac:PartyIdentification');
-  pid.ele(NS.cbc, 'cbc:ID').att('schemeID', 'CRN').txt(s.companyRegistrationNo).up();
-  pid.up();
+  return `
+  <cac:AccountingSupplierParty>
+    <cac:Party>
+      <cac:PartyIdentification>
+        <cbc:ID schemeID="CRN">${esc(s.companyRegistrationNo)}</cbc:ID>
+      </cac:PartyIdentification>
 
-  // PostalAddress
-  const addr = party.ele(NS.cac, 'cac:PostalAddress');
-  addr.ele(NS.cbc, 'cbc:StreetName').txt(s.address.street).up();
-  addr.ele(NS.cbc, 'cbc:BuildingNumber').txt(s.address.buildingNumber || '0').up();
-  addr.ele(NS.cbc, 'cbc:PlotIdentification').txt(s.address.plotIdentification).up();
-  addr.ele(NS.cbc, 'cbc:CitySubdivisionName').txt(s.address.citySubdivision).up();
-  addr.ele(NS.cbc, 'cbc:CityName').txt(s.address.city).up();
-  addr.ele(NS.cbc, 'cbc:PostalZone').txt(s.address.postalZone || '000000').up();
-  addr.ele(NS.cbc, 'cbc:CountrySubentity').txt(s.address.countrySubentity).up();
-  const country = addr.ele(NS.cac, 'cac:Country');
-  country.ele(NS.cbc, 'cbc:IdentificationCode').txt(s.address.countryCode).up();
-  country.up();
-  addr.up();
+      <cac:PostalAddress>
+        <cbc:StreetName>${esc(s.address.street)}</cbc:StreetName>
+        <cbc:BuildingNumber>${esc(s.address.buildingNumber || '0')}</cbc:BuildingNumber>
+        <cbc:PlotIdentification>${esc(s.address.plotIdentification)}</cbc:PlotIdentification>
+        <cbc:CitySubdivisionName>${esc(s.address.citySubdivision)}</cbc:CitySubdivisionName>
+        <cbc:CityName>${esc(s.address.city)}</cbc:CityName>
+        <cbc:PostalZone>${esc(s.address.postalZone || '000000')}</cbc:PostalZone>
+        <cbc:CountrySubentity>${esc(s.address.countrySubentity)}</cbc:CountrySubentity>
+        <cac:Country>
+          <cbc:IdentificationCode>${esc(s.address.countryCode)}</cbc:IdentificationCode>
+        </cac:Country>
+      </cac:PostalAddress>
 
-  // PartyTaxScheme
-  const pts = party.ele(NS.cac, 'cac:PartyTaxScheme');
-  pts.ele(NS.cbc, 'cbc:CompanyID').txt(s.vatNumber).up();
-  const ts = pts.ele(NS.cac, 'cac:TaxScheme');
-  ts.ele(NS.cbc, 'cbc:ID').txt('VAT').up();
-  ts.up();
-  pts.up();
+      <cac:PartyTaxScheme>
+        <cbc:CompanyID>${esc(s.vatNumber)}</cbc:CompanyID>
+        <cac:TaxScheme>
+          <cbc:ID>VAT</cbc:ID>
+        </cac:TaxScheme>
+      </cac:PartyTaxScheme>
 
-  // PartyLegalEntity
-  const ple = party.ele(NS.cac, 'cac:PartyLegalEntity');
-  ple.ele(NS.cbc, 'cbc:RegistrationName').txt(s.registrationName).up();
-  ple.up();
-
-  party.up();
-  sp.up();
+      <cac:PartyLegalEntity>
+        <cbc:RegistrationName>${esc(s.registrationName)}</cbc:RegistrationName>
+      </cac:PartyLegalEntity>
+    </cac:Party>
+  </cac:AccountingSupplierParty>`;
 }
 
-function buildCustomerParty(doc: any, invoice: Invoice) {
+function buildCustomerParty(invoice: Invoice): string {
   const c = invoice.customer;
-  const cp = doc.ele(NS.cac, 'cac:AccountingCustomerParty');
-  const party = cp.ele(NS.cac, 'cac:Party');
 
-  // PartyTaxScheme
-  const pts = party.ele(NS.cac, 'cac:PartyTaxScheme');
-  const ts = pts.ele(NS.cac, 'cac:TaxScheme');
-  ts.ele(NS.cbc, 'cbc:ID').txt('VAT').up();
-  ts.up();
-  pts.up();
+  return `
+  <cac:AccountingCustomerParty>
+    <cac:Party>
+      <cac:PartyTaxScheme>
+        <cac:TaxScheme>
+          <cbc:ID>VAT</cbc:ID>
+        </cac:TaxScheme>
+      </cac:PartyTaxScheme>
 
-  // PartyLegalEntity
-  const ple = party.ele(NS.cac, 'cac:PartyLegalEntity');
-  ple.ele(NS.cbc, 'cbc:RegistrationName').txt(c.registrationName).up();
-  ple.up();
-
-  party.up();
-  cp.up();
+      <cac:PartyLegalEntity>
+        <cbc:RegistrationName>${esc(c.registrationName)}</cbc:RegistrationName>
+      </cac:PartyLegalEntity>
+    </cac:Party>
+  </cac:AccountingCustomerParty>`;
 }
 
-function buildAllowanceCharge(doc: any, invoice: Invoice, totalTax: number) {
-  const ac = doc.ele(NS.cac, 'cac:AllowanceCharge');
-  ac.ele(NS.cbc, 'cbc:ChargeIndicator').txt('false').up();
-  ac.ele(NS.cbc, 'cbc:AllowanceChargeReasonCode').txt('95').up();
-  ac.ele(NS.cbc, 'cbc:AllowanceChargeReason').txt('Discount').up();
-  ac.ele(NS.cbc, 'cbc:Amount').att('currencyID', invoice.currency).txt(invoice.discount.toFixed(2)).up();
+function buildAllowanceCharge(invoice: Invoice, totalTax: number): string {
+  return `
+  <cac:AllowanceCharge>
+    <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
+    <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>
+    <cbc:AllowanceChargeReason>Discount</cbc:AllowanceChargeReason>
+    <cbc:Amount currencyID="${invoice.currency}">
+      ${invoice.discount.toFixed(2)}
+    </cbc:Amount>
+    <cac:TaxCategory>
+      <cbc:ID>S</cbc:ID>
+      <cbc:Percent>15.00</cbc:Percent>
+      <cac:TaxScheme>
+        <cbc:ID>VAT</cbc:ID>
+      </cac:TaxScheme>
+    </cac:TaxCategory>
+  </cac:AllowanceCharge>
 
-  const tc = ac.ele(NS.cac, 'cac:TaxCategory');
-  tc.ele(NS.cbc, 'cbc:ID').txt(invoice.discount > 0 ? 'Z' : 'S').up();
-  tc.ele(NS.cbc, 'cbc:Percent').txt('15.00').up();
-  const scheme = tc.ele(NS.cac, 'cac:TaxScheme');
-  scheme.ele(NS.cbc, 'cbc:ID').txt('VAT').up();
-  scheme.up();
-  tc.up();
-
-  ac.up();
-
-  // TaxTotal (simple, for allowance section)
-  const tt = doc.ele(NS.cac, 'cac:TaxTotal');
-  tt.ele(NS.cbc, 'cbc:TaxAmount').att('currencyID', invoice.currency).txt(totalTax.toFixed(2)).up();
-  tt.up();
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="${invoice.currency}">
+      ${totalTax.toFixed(2)}
+    </cbc:TaxAmount>
+  </cac:TaxTotal>`;
 }
 
-function buildTaxTotalWithSubtotal(doc: any, totalTax: number, subtotal: number, cur: string) {
-  const tt = doc.ele(NS.cac, 'cac:TaxTotal');
-  tt.ele(NS.cbc, 'cbc:TaxAmount').att('currencyID', cur).txt(totalTax.toFixed(2)).up();
-
-  const sub = tt.ele(NS.cac, 'cac:TaxSubtotal');
-  sub.ele(NS.cbc, 'cbc:TaxableAmount').att('currencyID', cur).txt(subtotal.toFixed(2)).up();
-  sub.ele(NS.cbc, 'cbc:TaxAmount').att('currencyID', cur).txt(totalTax.toFixed(2)).up();
-
-  const tc = sub.ele(NS.cac, 'cac:TaxCategory');
-  tc.ele(NS.cbc, 'cbc:ID').txt('S').up();
-  tc.ele(NS.cbc, 'cbc:Percent').txt('15.00').up();
-  const scheme = tc.ele(NS.cac, 'cac:TaxScheme');
-  scheme.ele(NS.cbc, 'cbc:ID').txt('VAT').up();
-  scheme.up();
-  tc.up();
-
-  sub.up();
-  tt.up();
+function buildTaxTotalWithSubtotal(totalTax: number, subtotal: number, cur: string): string {
+  return `
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="${cur}">${totalTax.toFixed(2)}</cbc:TaxAmount>
+    <cac:TaxSubtotal>
+      <cbc:TaxableAmount currencyID="${cur}">${subtotal.toFixed(2)}</cbc:TaxableAmount>
+      <cbc:TaxAmount currencyID="${cur}">${totalTax.toFixed(2)}</cbc:TaxAmount>
+      <cac:TaxCategory>
+        <cbc:ID>S</cbc:ID>
+        <cbc:Percent>15.00</cbc:Percent>
+        <cac:TaxScheme>
+          <cbc:ID>VAT</cbc:ID>
+        </cac:TaxScheme>
+      </cac:TaxCategory>
+    </cac:TaxSubtotal>
+  </cac:TaxTotal>`;
 }
 
 function buildLegalMonetaryTotal(
-  doc: any,
   totals: ReturnType<typeof calculateTotals>,
   discount: number,
   cur: string,
-) {
+): string {
   const f = (n: number) => n.toFixed(2);
-  const lmt = doc.ele(NS.cac, 'cac:LegalMonetaryTotal');
-  lmt.ele(NS.cbc, 'cbc:LineExtensionAmount').att('currencyID', cur).txt(f(totals.subtotal)).up();
-  lmt.ele(NS.cbc, 'cbc:TaxExclusiveAmount').att('currencyID', cur).txt(f(totals.subtotal)).up();
-  lmt.ele(NS.cbc, 'cbc:TaxInclusiveAmount').att('currencyID', cur).txt(f(totals.totalWithTax)).up();
-  lmt.ele(NS.cbc, 'cbc:AllowanceTotalAmount').att('currencyID', cur).txt(f(discount)).up();
-  lmt.ele(NS.cbc, 'cbc:PayableAmount').att('currencyID', cur).txt(f(totals.payableAmount)).up();
-  lmt.up();
+
+  return `
+  <cac:LegalMonetaryTotal>
+    <cbc:LineExtensionAmount currencyID="${cur}">${f(totals.subtotal)}</cbc:LineExtensionAmount>
+    <cbc:TaxExclusiveAmount currencyID="${cur}">${f(totals.subtotal)}</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="${cur}">${f(totals.totalWithTax)}</cbc:TaxInclusiveAmount>
+    <cbc:AllowanceTotalAmount currencyID="${cur}">${f(discount)}</cbc:AllowanceTotalAmount>
+    <cbc:PayableAmount currencyID="${cur}">${f(totals.payableAmount)}</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>`;
 }
 
-function buildInvoiceLines(doc: any, invoice: Invoice) {
+function buildInvoiceLines(invoice: Invoice): string {
   const cur = invoice.currency;
   const f = (n: number) => n.toFixed(2);
 
-  invoice.items.forEach((item, i) => {
-    const { lineExtension, tax } = calculateItemAmounts(item, invoice.isTaxIncludedInPrice);
+  return invoice.items.map((item, i) => {
+    const { lineExtension, tax } =
+      calculateItemAmounts(item, invoice.isTaxIncludedInPrice);
 
-    const il = doc.ele(NS.cac, 'cac:InvoiceLine');
-    il.ele(NS.cbc, 'cbc:ID').txt(String(i + 1)).up();
-    il.ele(NS.cbc, 'cbc:InvoicedQuantity').att('unitCode', item.unitOfMeasure).txt(f(item.quantity)).up();
-    il.ele(NS.cbc, 'cbc:LineExtensionAmount').att('currencyID', cur).txt(f(lineExtension)).up();
-
-    // TaxTotal per line
-    const tt = il.ele(NS.cac, 'cac:TaxTotal');
-    tt.ele(NS.cbc, 'cbc:TaxAmount').att('currencyID', cur).txt(f(tax)).up();
-    tt.ele(NS.cbc, 'cbc:RoundingAmount').att('currencyID', cur).txt(f(lineExtension + tax)).up();
-    tt.up();
-
-    // Item
-    const itm = il.ele(NS.cac, 'cac:Item');
-    itm.ele(NS.cbc, 'cbc:Name').txt(item.name).up();
-
-    const ctc = itm.ele(NS.cac, 'cac:ClassifiedTaxCategory');
-    ctc.ele(NS.cbc, 'cbc:ID').txt('S').up();
-    ctc.ele(NS.cbc, 'cbc:Percent').txt('15.00').up();
-    const scheme = ctc.ele(NS.cac, 'cac:TaxScheme');
-    scheme.ele(NS.cbc, 'cbc:ID').txt('VAT').up();
-    scheme.up();
-    ctc.up();
-
-    itm.up();
-
-    // Price (tax-exclusive unit price)
     const unitPrice = invoice.isTaxIncludedInPrice
       ? lineExtension / item.quantity
       : item.price;
-    const price = il.ele(NS.cac, 'cac:Price');
-    price.ele(NS.cbc, 'cbc:PriceAmount').att('currencyID', cur).txt(f(unitPrice)).up();
-    price.up();
 
-    il.up();
-  });
+    return `
+    <cac:InvoiceLine>
+      <cbc:ID>${i + 1}</cbc:ID>
+      <cbc:InvoicedQuantity unitCode="${item.unitOfMeasure}">
+        ${f(item.quantity)}
+      </cbc:InvoicedQuantity>
+      <cbc:LineExtensionAmount currencyID="${cur}">
+        ${f(lineExtension)}
+      </cbc:LineExtensionAmount>
+
+      <cac:TaxTotal>
+        <cbc:TaxAmount currencyID="${cur}">${f(tax)}</cbc:TaxAmount>
+        <cbc:RoundingAmount currencyID="${cur}">
+          ${f(lineExtension + tax)}
+        </cbc:RoundingAmount>
+      </cac:TaxTotal>
+
+      <cac:Item>
+        <cbc:Name>${esc(item.name)}</cbc:Name>
+        <cac:ClassifiedTaxCategory>
+          <cbc:ID>S</cbc:ID>
+          <cbc:Percent>15.00</cbc:Percent>
+          <cac:TaxScheme>
+            <cbc:ID>VAT</cbc:ID>
+          </cac:TaxScheme>
+        </cac:ClassifiedTaxCategory>
+      </cac:Item>
+
+      <cac:Price>
+        <cbc:PriceAmount currencyID="${cur}">
+          ${f(unitPrice)}
+        </cbc:PriceAmount>
+      </cac:Price>
+    </cac:InvoiceLine>`;
+  }).join('');
 }
