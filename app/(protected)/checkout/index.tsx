@@ -10,8 +10,13 @@ import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
 import { createInvoicePipeline } from '@/src/services/zatca/invoicePipeline';
-import { Invoice } from '@/src/services/zatca/types';
-import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
+import type { Invoice } from '@/src/services/zatca/types';
+import {
+  getPreviousInvoiceHash,
+  isTaxIncludedInPrice,
+  certificate as zatcaCert,
+  supplier as zatcaSupplier,
+} from '@/src/services/zatca/zatcaConfig';
 import { Ionicons } from '@expo/vector-icons';
 import { randomUUID } from 'expo-crypto';
 import { useRouter } from 'expo-router';
@@ -84,24 +89,36 @@ export default function CheckoutPage() {
 
     try {
       const now = new Date();
+      const previousHash = await getPreviousInvoiceHash();
+
       const invoice: Invoice = {
         uuid: randomUUID(),
         invoiceNumber: `INV-${Date.now()}`,
         issueDate: now.toISOString().split('T')[0],
         issueTime: now.toTimeString().split(' ')[0],
         timestamp: now.toISOString(),
-        sellerName: 'My Shop', // TODO: Replace with user shopName from DB
-        vatNumber: '300000000000003', // TODO: Replace with real seller VAT
-        customerName: selectedCustomer?.name ?? 'Walk-in Customer',
+        supplier: zatcaSupplier,
+        customer: {
+          registrationName: selectedCustomer?.name ?? 'Walk-in Customer',
+        },
+        previousInvoiceHash: previousHash,
         currency: 'SAR',
+        discount: 0,
+        isTaxIncludedInPrice,
         items: cartItems.map((ci) => ({
           name: ci.product.name ?? 'Unknown Item',
           quantity: ci.quantity,
           price: ci.product.uomPrice ?? ci.product.price ?? 0,
+          taxPercentage: ci.product.taxPercentage ?? 15,
+          unitOfMeasure: ci.product.uom ?? 'PCE',
         })),
       };
 
-      const result = await createInvoicePipeline(invoice, 'PLACEHOLDER_PRIVATE_KEY');
+      const result = await createInvoicePipeline(
+        invoice,
+        zatcaCert.certificateBase64,
+        zatcaCert.privateKeyBase64,
+      );
       console.log('ZATCA Invoice Result:', result);
 
       Alert.alert('Payment Completed', `Invoice ${invoice.invoiceNumber} generated successfully.`);
@@ -193,9 +210,8 @@ export default function CheckoutPage() {
                             phoneNo: customer.phoneNo,
                           })
                         }
-                        className={`flex-row items-center px-4 py-3 border-b border-gray-50 ${
-                          selectedCustomer?.id === customer.id ? 'bg-green-50' : ''
-                        }`}>
+                        className={`flex-row items-center px-4 py-3 border-b border-gray-50 ${selectedCustomer?.id === customer.id ? 'bg-green-50' : ''
+                          }`}>
                         <View className="w-8 h-8 rounded-full bg-gray-100 items-center justify-center mr-3">
                           <Ionicons name="person-outline" size={16} color="#6b7280" />
                         </View>
@@ -307,7 +323,7 @@ export default function CheckoutPage() {
             cartItems={cartItems}
             onRemoveItem={(index) => dispatch(removeFromCart(index))}
             onUpdateQuantity={(index, delta) => dispatch(updateQuantity({ index, delta }))}
-            onCheckout={() => {}}
+            onCheckout={() => { }}
             showActions={false}
           />
         </View>
@@ -379,9 +395,8 @@ function PaymentMethodOption({
   return (
     <TouchableOpacity
       onPress={onPress}
-      className={`flex-1 p-4 rounded-xl border ${
-        isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'
-      }`}>
+      className={`flex-1 p-4 rounded-xl border ${isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'
+        }`}>
       <View className="flex-row justify-between items-start mb-3">
         <View className={`w-12 h-12 rounded-full items-center justify-center ${bgIcon}`}>
           <Ionicons name={icon} size={24} color={color} />

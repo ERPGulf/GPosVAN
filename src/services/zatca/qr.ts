@@ -1,35 +1,27 @@
-import { encodeTLV } from './tlv';
+/* ------------------------------------------------------------------ */
+/*  ZATCA E-Invoicing – QR TLV payload builder                        */
+/* ------------------------------------------------------------------ */
 
-const CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+import { bytesToBase64 } from './certificate';
+import { encodeTLV, encodeTLVBytes } from './tlv';
 
-/** Pure-JS Uint8Array → base64 (no Buffer needed). */
-function uint8ToBase64(bytes: Uint8Array): string {
-  let result = '';
-  const len = bytes.length;
-  for (let i = 0; i < len; i += 3) {
-    const b0 = bytes[i];
-    const b1 = i + 1 < len ? bytes[i + 1] : 0;
-    const b2 = i + 2 < len ? bytes[i + 2] : 0;
-    result += CHARS[b0 >> 2];
-    result += CHARS[((b0 & 3) << 4) | (b1 >> 4)];
-    result += i + 1 < len ? CHARS[((b1 & 15) << 2) | (b2 >> 6)] : '=';
-    result += i + 2 < len ? CHARS[b2 & 63] : '=';
-  }
-  return result;
-}
-
-export function buildQRPayload(data: {
+export interface QRPayloadInput {
   sellerName: string;
   vatNumber: string;
   timestamp: string;
   total: string;
   vat: string;
-  hash: string;
-  signature: string;
-  publicKey: string;
-  certHash: string;
-}) {
-  const tags = [
+  hash: string;              // base-64 invoice hash
+  signature: string;          // base-64 signature
+  publicKeyBytes: Uint8Array; // raw bytes for tag 8
+  certSignatureBytes: Uint8Array; // raw bytes for tag 9
+}
+
+/**
+ * Build the ZATCA QR TLV payload and return it as a base-64 string.
+ */
+export function buildQRPayload(data: QRPayloadInput): string {
+  const tags: Uint8Array[] = [
     encodeTLV(1, data.sellerName),
     encodeTLV(2, data.vatNumber),
     encodeTLV(3, data.timestamp),
@@ -37,20 +29,18 @@ export function buildQRPayload(data: {
     encodeTLV(5, data.vat),
     encodeTLV(6, data.hash),
     encodeTLV(7, data.signature),
-    encodeTLV(8, data.publicKey),
-    encodeTLV(9, data.certHash),
+    encodeTLVBytes(8, data.publicKeyBytes),
+    encodeTLVBytes(9, data.certSignatureBytes),
   ];
 
   const totalLength = tags.reduce((sum, t) => sum + t.length, 0);
-
   const merged = new Uint8Array(totalLength);
-
   let offset = 0;
 
-  tags.forEach((tag) => {
+  for (const tag of tags) {
     merged.set(tag, offset);
     offset += tag.length;
-  });
+  }
 
-  return uint8ToBase64(merged);
+  return bytesToBase64(merged);
 }
