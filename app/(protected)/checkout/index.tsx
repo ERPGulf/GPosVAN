@@ -17,6 +17,7 @@ import {
   certificate as zatcaCert,
   supplier as zatcaSupplier,
 } from '@/src/services/zatca/zatcaConfig';
+import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import { randomUUID } from 'expo-crypto';
 import { useRouter } from 'expo-router';

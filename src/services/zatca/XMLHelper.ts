@@ -313,3 +313,136 @@ function buildInvoiceLines(invoice: Invoice): string {
     </cac:InvoiceLine>`;
   }).join('');
 }
+export function injectQRData(xml: string, qrBase64: string): string {
+  return xml.replace('PLACEHOLDER_QR', qrBase64);
+}
+export function injectUBLExtensions(
+  xml: string,
+  invoiceHashBase64: string,
+  signedPropsHash: string,
+  signatureValueBase64: string,
+  certificateBody: string,
+  signingTime: string,
+  certificateDigest: string,
+  issuerName: string,
+  serialNumber: string,
+): string {
+
+  const extBlock = `
+  <ext:UBLExtensions>
+    <ext:UBLExtension>
+      <ext:ExtensionURI>
+        urn:oasis:names:specification:ubl:dsig:enveloped:xades
+      </ext:ExtensionURI>
+      <ext:ExtensionContent>
+        <sig:UBLDocumentSignatures>
+          <sac:SignatureInformation>
+            <cbc:ID>
+              urn:oasis:names:specification:ubl:signature:1
+            </cbc:ID>
+            <sbc:ReferencedSignatureID>
+              urn:oasis:names:specification:ubl:signature:Invoice
+            </sbc:ReferencedSignatureID>
+            ${buildDSSignature(
+    invoiceHashBase64,
+    signedPropsHash,
+    signatureValueBase64,
+    certificateBody,
+    signingTime,
+    certificateDigest,
+    issuerName,
+    serialNumber
+  )}
+          </sac:SignatureInformation>
+        </sig:UBLDocumentSignatures>
+      </ext:ExtensionContent>
+    </ext:UBLExtension>
+  </ext:UBLExtensions>
+  `;
+
+  return xml.replace(
+    /<Invoice[\s\S]*?>/,
+    match => match + extBlock
+  );
+}
+function buildDSSignature(
+  invoiceHash: string,
+  signedPropsHash: string,
+  signatureValue: string,
+  certificateBody: string,
+  signingTime: string,
+  certificateDigest: string,
+  issuerName: string,
+  serialNumber: string,
+): string {
+
+  return `
+  <ds:Signature Id="signature">
+
+    <ds:SignedInfo>
+      <ds:CanonicalizationMethod Algorithm="http://www.w3.org/2006/12/xml-c14n11"/>
+      <ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"/>
+
+      <ds:Reference Id="invoiceSignedData" URI="">
+        <ds:Transforms>
+          <ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116">
+            <ds:XPath>not(//ancestor-or-self::ext:UBLExtensions)</ds:XPath>
+          </ds:Transform>
+          <ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116">
+            <ds:XPath>not(//ancestor-or-self::cac:Signature)</ds:XPath>
+          </ds:Transform>
+          <ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116">
+            <ds:XPath>
+              not(//ancestor-or-self::cac:AdditionalDocumentReference[cbc:ID='QR'])
+            </ds:XPath>
+          </ds:Transform>
+          <ds:Transform Algorithm="http://www.w3.org/2006/12/xml-c14n11"/>
+        </ds:Transforms>
+        <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+        <ds:DigestValue>${invoiceHash}</ds:DigestValue>
+      </ds:Reference>
+
+      <ds:Reference URI="#xadesSignedProperties"
+        Type="http://www.w3.org/2000/09/xmldsig#SignatureProperties">
+        <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+        <ds:DigestValue>${signedPropsHash}</ds:DigestValue>
+      </ds:Reference>
+
+    </ds:SignedInfo>
+
+    <ds:SignatureValue>${signatureValue}</ds:SignatureValue>
+
+    <ds:KeyInfo>
+      <ds:X509Data>
+        <ds:X509Certificate>${certificateBody}</ds:X509Certificate>
+      </ds:X509Data>
+    </ds:KeyInfo>
+
+    <ds:Object>
+      <xades:QualifyingProperties Target="signature">
+        <xades:SignedProperties Id="xadesSignedProperties">
+          <xades:SignedSignatureProperties>
+
+            <xades:SigningTime>${signingTime}</xades:SigningTime>
+
+            <xades:SigningCertificate>
+              <xades:Cert>
+                <xades:CertDigest>
+                  <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+                  <ds:DigestValue>${certificateDigest}</ds:DigestValue>
+                </xades:CertDigest>
+                <xades:IssuerSerial>
+                  <ds:X509IssuerName>${issuerName}</ds:X509IssuerName>
+                  <ds:X509SerialNumber>${serialNumber}</ds:X509SerialNumber>
+                </xades:IssuerSerial>
+              </xades:Cert>
+            </xades:SigningCertificate>
+
+          </xades:SignedSignatureProperties>
+        </xades:SignedProperties>
+      </xades:QualifyingProperties>
+    </ds:Object>
+
+  </ds:Signature>
+  `;
+}
