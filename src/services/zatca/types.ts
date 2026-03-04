@@ -16,8 +16,8 @@ export interface Address {
 
 // ───────── Supplier / Seller ─────────
 export interface SupplierParty {
-  registrationName: string;   // Company abbreviation / name
-  vatNumber: string;           // Tax ID (CompanyID)
+  registrationName: string; // Company abbreviation / name
+  vatNumber: string; // Tax ID (CompanyID)
   companyRegistrationNo: string; // CRN
   address: Address;
 }
@@ -55,9 +55,9 @@ export interface InvoiceItem {
 export interface Invoice {
   uuid: string;
   invoiceNumber: string;
-  issueDate: string;   // yyyy-MM-dd
-  issueTime: string;   // HH:mm:ss
-  timestamp: string;   // ISO-8601
+  issueDate: string; // yyyy-MM-dd
+  issueTime: string; // HH:mm:ss
+  timestamp: string; // ISO-8601
 
   supplier: SupplierParty;
   customer: CustomerParty;
@@ -90,7 +90,8 @@ export interface InvoiceTotals {
 // ───────── Pipeline result ─────────
 export interface InvoiceResult {
   xml: string;
-  hash: string;         // base-64 invoice hash
-  signature: string;    // base-64 signature
-  qrBase64: string;     // base-64 QR TLV payload
+  hash: string; // base-64 invoice hash
+  signature: string; // base-64 signature
+  qrBase64: string; // base-64 QR TLV payload
+  savedUri?: string; // local URI path where XML is saved
 }

@@ -9,7 +9,11 @@ import { AddCustomerModal } from '@/src/features/customers/components/AddCustome
 import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
-import { createInvoicePipeline } from '@/src/services/zatca/invoicePipeline';
+import {
+  createInvoicePipeline,
+  saveInvoiceXML,
+  shareInvoiceXML,
+} from '@/src/services/zatca/invoicePipeline';
 import type { Invoice } from '@/src/services/zatca/types';
 import {
   getPreviousInvoiceHash,
@@ -22,7 +26,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { randomUUID } from 'expo-crypto';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
 
 type PaymentMethod = 'Cash/Card' | 'Cash' | 'Card';
 
@@ -48,6 +53,17 @@ export default function CheckoutPage() {
   const [selectedCustomer, setSelectedCustomer] = useState<SelectedCustomer | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [customerSearch, setCustomerSearch] = useState('');
+
+  // ZATCA Result State
+  const [isZatcaModalVisible, setIsZatcaModalVisible] = useState(false);
+  const [zatcaResult, setZatcaResult] = useState<{
+    xml: string;
+    hash: string;
+    signature: string;
+    qrBase64: string;
+    savedUri?: string;
+  } | null>(null);
+  const [invoiceData, setInvoiceData] = useState<Invoice | null>(null);
 
   const filteredCustomers = useMemo(() => {
     if (!customers) return [];
@@ -120,17 +136,31 @@ export default function CheckoutPage() {
         zatcaCert.certificateBase64,
         zatcaCert.privateKeyBase64,
       );
-      console.log('ZATCA Invoice Result:', result);
+      console.log('ZATCA Invoice Result generated successfully.', result.hash);
 
-      Alert.alert('Payment Completed', `Invoice ${invoice.invoiceNumber} generated successfully.`);
-      dispatch(clearCart());
-      router.replace('/');
+      // Save XML to device (optional but recommended for ZATCA)
+      const savedUri = await saveInvoiceXML(invoice.invoiceNumber, result.xml);
+
+      // Display the QR Code Modal
+      setZatcaResult({ ...result, savedUri });
+      setInvoiceData(invoice);
+      setIsZatcaModalVisible(true);
+
+      // Moved dispatch(clearCart()) and router.replace('/') to the Modal close handler
     } catch (error) {
       console.error('Invoice pipeline error:', error);
       Alert.alert('Error', 'Failed to generate invoice. Please try again.');
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const handleCloseZatcaModal = () => {
+    setIsZatcaModalVisible(false);
+    setZatcaResult(null);
+    setInvoiceData(null);
+    dispatch(clearCart());
+    router.replace('/');
   };
 
   const handleSaveAndClear = () => {
@@ -211,8 +241,9 @@ export default function CheckoutPage() {
                             phoneNo: customer.phoneNo,
                           })
                         }
-                        className={`flex-row items-center px-4 py-3 border-b border-gray-50 ${selectedCustomer?.id === customer.id ? 'bg-green-50' : ''
-                          }`}>
+                        className={`flex-row items-center px-4 py-3 border-b border-gray-50 ${
+                          selectedCustomer?.id === customer.id ? 'bg-green-50' : ''
+                        }`}>
                         <View className="w-8 h-8 rounded-full bg-gray-100 items-center justify-center mr-3">
                           <Ionicons name="person-outline" size={16} color="#6b7280" />
                         </View>
@@ -324,7 +355,7 @@ export default function CheckoutPage() {
             cartItems={cartItems}
             onRemoveItem={(index) => dispatch(removeFromCart(index))}
             onUpdateQuantity={(index, delta) => dispatch(updateQuantity({ index, delta }))}
-            onCheckout={() => { }}
+            onCheckout={() => {}}
             showActions={false}
           />
         </View>
@@ -372,6 +403,69 @@ export default function CheckoutPage() {
         totalAmount={total}
         initialAmount={cashAmount}
       />
+
+      {/* ZATCA Success / QR Code Modal */}
+      <Modal visible={isZatcaModalVisible} transparent animationType="fade">
+        <View className="flex-1 bg-black/50 justify-center items-center">
+          <View className="w-11/12 max-w-md bg-white rounded-2xl overflow-hidden shadow-2xl">
+            <View className="bg-green-50 px-6 py-4 flex-row items-center justify-between border-b border-green-100">
+              <View className="flex-row items-center">
+                <View className="w-10 h-10 rounded-full bg-green-100 items-center justify-center mr-3">
+                  <Ionicons name="checkmark-circle" size={24} color="#22c55e" />
+                </View>
+                <View>
+                  <Text className="text-xl font-bold text-gray-800">Invoice Generated</Text>
+                  <Text className="text-sm text-green-600 font-medium">ZATCA B2C Standard</Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={handleCloseZatcaModal} className="p-2">
+                <Ionicons name="close" size={24} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
+
+            <View className="p-6 items-center">
+              <View className="mb-6 items-center">
+                <Text className="text-gray-500 mb-1">Invoice Number</Text>
+                <Text className="text-lg font-bold text-gray-800">
+                  {invoiceData?.invoiceNumber}
+                </Text>
+              </View>
+
+              {zatcaResult?.qrBase64 ? (
+                <View className="p-4 bg-white rounded-xl shadow-sm border border-gray-100 items-center justify-center">
+                  <QRCode value={zatcaResult.qrBase64} size={200} quietZone={10} />
+                  <Text className="text-xs text-gray-400 mt-4 text-center px-4">
+                    Scan with official ZATCA app or supported QR reader
+                  </Text>
+                </View>
+              ) : (
+                <View className="w-48 h-48 bg-gray-100 rounded-xl items-center justify-center">
+                  <Text className="text-gray-400">QR Code Error</Text>
+                </View>
+              )}
+
+              <View className="w-full mt-6 pt-6 border-t border-gray-100 gap-3">
+                <TouchableOpacity
+                  onPress={() => {
+                    if (zatcaResult?.savedUri) {
+                      shareInvoiceXML(zatcaResult.savedUri);
+                    }
+                  }}
+                  className="w-full bg-gray-100 py-3 rounded-xl items-center flex-row justify-center border border-gray-200">
+                  <Ionicons name="share-outline" size={20} color="#374151" className="mr-2" />
+                  <Text className="text-gray-700 font-semibold text-lg ml-2">Share XML</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleCloseZatcaModal}
+                  className="w-full bg-green-500 py-3 rounded-xl items-center">
+                  <Text className="text-white font-bold text-lg">Done & New Order</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -396,8 +490,9 @@ function PaymentMethodOption({
   return (
     <TouchableOpacity
       onPress={onPress}
-      className={`flex-1 p-4 rounded-xl border ${isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'
-        }`}>
+      className={`flex-1 p-4 rounded-xl border ${
+        isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'
+      }`}>
       <View className="flex-row justify-between items-start mb-3">
         <View className={`w-12 h-12 rounded-full items-center justify-center ${bgIcon}`}>
           <Ionicons name={icon} size={24} color={color} />

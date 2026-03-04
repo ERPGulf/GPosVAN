@@ -1,9 +1,9 @@
 /* ------------------------------------------------------------------ */
 /*  ZATCA E-Invoicing – invoice creation pipeline                     */
 /*                                                                    */
-/*  Orchestrates the full flow from invoice data → signed XML + QR.   */
-/*  Mirrors the C# XMLHelper.CreateInvoice method.                    */
 /* ------------------------------------------------------------------ */
+import { Directory, File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 
 import {
   base64ToBytes,
@@ -70,7 +70,9 @@ export async function createInvoicePipeline(
   try {
     const decoded = new TextDecoder().decode(base64ToBytes(certificateBase64));
     // If decoded result looks like base-64, use it directly; otherwise use original
-    certificateBody = /^[A-Za-z0-9+/=\s]+$/.test(decoded.trim()) ? decoded.trim() : certificateBase64;
+    certificateBody = /^[A-Za-z0-9+/=\s]+$/.test(decoded.trim())
+      ? decoded.trim()
+      : certificateBase64;
   } catch {
     certificateBody = certificateBase64;
   }
@@ -89,11 +91,7 @@ export async function createInvoicePipeline(
   );
 
   /* ── 8. Build QR payload ── */
-  const totals = calculateTotals(
-    invoice.items,
-    invoice.isTaxIncludedInPrice,
-    invoice.discount,
-  );
+  const totals = calculateTotals(invoice.items, invoice.isTaxIncludedInPrice, invoice.discount);
 
   const publicKeyBytes = getPublicKeyBytes(certificateBase64);
   const certSigBytes = getCertificateSignatureBytes(certificateBase64);
@@ -122,5 +120,42 @@ export async function createInvoicePipeline(
     hash: invoiceHash.base64,
     signature: signatureBase64,
     qrBase64,
+    savedUri: undefined,
   };
+}
+
+/**
+ * Utility to save the generated XML to the device's Document folder
+ * and optionally prompt the user to share/save it.
+ */
+export async function saveInvoiceXML(invoiceNumber: string, xmlContent: string) {
+  const dir = new Directory(Paths.document, 'zatca_invoices');
+  await dir.create({ intermediates: true });
+
+  const file = new File(dir, `Invoice_${invoiceNumber}.xml`);
+
+  await file.write(xmlContent);
+
+  console.log('Saved invoice XML:', file.uri);
+
+  return file.uri;
+}
+
+/**
+ * Utility to trigger the native share dialog for the saved XML file
+ */
+export async function shareInvoiceXML(fileUri: string) {
+  try {
+    const isAvailable = await Sharing.isAvailableAsync();
+    if (isAvailable) {
+      await Sharing.shareAsync(fileUri, {
+        mimeType: 'application/xml',
+        dialogTitle: 'Share ZATCA Invoice',
+      });
+    } else {
+      console.warn('Sharing is not available on this device');
+    }
+  } catch (error) {
+    console.error('Error sharing invoice XML:', error);
+  }
 }
