@@ -17,14 +17,27 @@ import * as Crypto from 'expo-crypto';
  * SHA-256 digest of the raw certificate bytes, returned as base-64.
  */
 export async function getCertificateDigestValue(certBase64: string): Promise<string> {
-  const raw = base64ToBytes(certBase64);
+  // decode certificate
+  const certBytes = base64ToBytes(certBase64);
 
-  const hash = await Crypto.digest(
+  // SHA256
+  const hashBuffer = await Crypto.digest(
     Crypto.CryptoDigestAlgorithm.SHA256,
-    raw as unknown as BufferSource,
+    certBytes as unknown as BufferSource,
   );
 
-  return bytesToBase64(new Uint8Array(hash));
+  const hashBytes = new Uint8Array(hashBuffer);
+
+  // convert to HEX string
+  const hex = Array.from(hashBytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+
+  // convert HEX string → UTF8 bytes
+  const utf8Bytes = new TextEncoder().encode(hex);
+
+  // base64 encode
+  return bytesToBase64(utf8Bytes);
 }
 /**
  * Extract the issuer distinguished-name as a human-readable string.
@@ -53,15 +66,89 @@ export function getPublicKeyBytes(certBase64: string): Uint8Array {
   const tbsCert = parseTBSCertificate(der);
   return tbsCert.publicKeyBytes;
 }
+export function getPublicKeyBytesFromPem(publicKeyBase64: string): Uint8Array {
+  // decode outer base64
+  const pem = new TextDecoder().decode(base64ToBytes(publicKeyBase64));
 
+  // remove headers
+  const cleaned = pem
+    .replace('-----BEGIN PUBLIC KEY-----', '')
+    .replace('-----END PUBLIC KEY-----', '')
+    .replace(/\n/g, '');
+
+  // decode DER
+  const der = base64ToBytes(cleaned);
+
+  // last 65 bytes are the EC point
+  return der.slice(-65);
+}
+
+export function decodeCertificate(certBase64: string): Uint8Array {
+  // step 1: decode outer base64 -> PEM text
+  const pem = new TextDecoder().decode(base64ToBytes(certBase64));
+
+  // remove headers
+  const cleaned = pem
+    .replace('-----BEGIN CERTIFICATE-----', '')
+    .replace('-----END CERTIFICATE-----', '')
+    .replace(/\n/g, '')
+    .trim();
+
+  // step 2: decode inner base64 -> DER
+  return base64ToBytes(cleaned);
+}
 /**
  * Raw certificate signature bytes (for QR tag 9).
  */
-export function getCertificateSignatureBytes(certBase64: string): Uint8Array {
-  const der = base64ToBytes(certBase64);
-  return parseSignatureValue(der);
-}
+// export function getCertificateSignatureBytes(certBase64: string): Uint8Array {
+//   const der = base64ToBytes(certBase64);
+//   return parseSignatureValue(der);
+// }
+export function getCertificateSignatureBytes(certBase64?: string): Uint8Array {
+  try {
+    if (!certBase64) {
+      throw new Error('ZATCA certificate is missing or undefined');
+    }
 
+    const der = decodeCertificate(certBase64);
+
+    if (!der || der.length === 0) {
+      throw new Error('Certificate decoding failed (DER empty)');
+    }
+
+    console.log('Certificate DER length:', der.length);
+
+    // Scan backwards for BIT STRING (0x03)
+    for (let i = der.length - 1; i >= 0; i--) {
+      if (der[i] === 0x03) {
+        const length = der[i + 1];
+
+        // basic sanity check
+        if (!length || length < 60 || length > 80) continue;
+
+        const start = i + 3;
+        const end = start + length - 1;
+
+        if (end > der.length) continue;
+
+        const signature = der.slice(start, end);
+
+        console.log('Certificate signature found. Length:', signature.length);
+
+        return signature;
+      }
+    }
+
+    console.error('Certificate parsing failed. DER preview:', Array.from(der.slice(0, 40)));
+
+    throw new Error(
+      'Certificate signature not found. The certificate may not be valid X509 DER or may have an unexpected structure.',
+    );
+  } catch (err) {
+    console.error('ZATCA certificate signature extraction error:', err);
+    throw err;
+  }
+}
 /* ====================================================================
  * Minimal ASN.1 / DER parser
  * ==================================================================== */

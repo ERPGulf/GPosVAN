@@ -3,7 +3,7 @@
 /* ------------------------------------------------------------------ */
 
 import { bytesToBase64 } from './certificate';
-import { encodeTLV, encodeTLVBytes } from './tlv';
+import { encodeTLV, encodeTLVBytes, encodeTLVRaw } from './tlv';
 
 export interface QRPayloadInput {
   sellerName: string;
@@ -11,8 +11,8 @@ export interface QRPayloadInput {
   timestamp: string;
   total: string;
   vat: string;
-  hash: string;              // base-64 invoice hash
-  signature: string;          // base-64 signature
+  hash: string; // base-64 invoice hash
+  signature: Uint8Array; // base-64 signature
   publicKeyBytes: Uint8Array; // raw bytes for tag 8
   certSignatureBytes: Uint8Array; // raw bytes for tag 9
 }
@@ -28,7 +28,7 @@ export function buildQRPayload(data: QRPayloadInput): string {
     encodeTLV(4, data.total),
     encodeTLV(5, data.vat),
     encodeTLV(6, data.hash),
-    encodeTLV(7, data.signature),
+    encodeTLVBytes(7, data.signature),
     encodeTLVBytes(8, data.publicKeyBytes),
     encodeTLVBytes(9, data.certSignatureBytes),
   ];

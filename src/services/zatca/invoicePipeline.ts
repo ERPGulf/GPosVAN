@@ -11,6 +11,7 @@ import {
   getCertificateIssuer,
   getCertificateSignatureBytes,
   getPublicKeyBytes,
+  getPublicKeyBytesFromPem,
   getSerialNumber,
 } from './certificate';
 import { generateInvoiceHash, generateSignedPropertiesHash } from './hash';
@@ -43,6 +44,8 @@ export async function createInvoicePipeline(
 
   /* ── 2. Hash the base XML ── */
   const invoiceHash = await generateInvoiceHash(baseXml);
+  console.log('Invoice Hash:', invoiceHash.base64);
+  console.log('Canonical XML:', invoiceHash.canonicalXml);
 
   /* ── 3. Sign the hash ── */
   const { derBase64: signatureBase64, rawBytes: signatureRawBytes } = signHash(
@@ -92,9 +95,23 @@ export async function createInvoicePipeline(
 
   /* ── 8. Build QR payload ── */
   const totals = calculateTotals(invoice.items, invoice.isTaxIncludedInPrice, invoice.discount);
+  const PUBLICKEY =
+    'LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZZd0VBWUhLb1pJemowQ0FRWUZLNEVFQUFvRFFnQUVnT0xiQzNSWWlnZUJFSG5aYTBWMVFTMmk2VW03SURLdQpEa3JFb1VYNGlVekMxalRJNjA4dnM5NkdPekFrQmd3UGRZQXoxNnNnVVVLRlBUR3phZCtZR1E9PQotLS0tLUVORCBQVUJMSUMgS0VZLS0tLS0=';
+  const CERTSIGNER =
+    'TUlJQ09EQ0NBZDZnQXdJQkFnSUdBWmhDcHo5Y01Bb0dDQ3FHU000OUJBTUNNQlV4RXpBUkJnTlZCQU1NQ21WSmJuWnZhV05wYm1jd0hoY05NalV3TnpJMU1UY3pOVEE0V2hjTk16QXdOekkwTWpFd01EQXdXakJ5TVFzd0NRWURWUVFHRXdKVFFURVlNQllHQTFVRUN3d1BNekV5TkRFNU1UY3dNVEF3TURBek1TRXdId1lEVlFRS0RCaEtZWGRoWkNCQmJHUnBZV1poSUZSeVlXUnBibWNnUTI4eEpqQWtCZ05WQkFNTUhWUlRWQzA0T0RZME16RXhORFV0TXpFeU5ERTVNVGN3TVRBd01EQXpNRll3RUFZSEtvWkl6ajBDQVFZRks0RUVBQW9EUWdBRW56VVI3V1BTTVhQSGpGUElNcVpWTjlDQ1AyN2FmazZyaTlhUDVONUFKNkR1MUNBbTU4RWk2WnFFamEwelljZW9nL1JEWjlNZWRYS2FvN1JwUS9WZlc2T0J2ekNCdkRBTUJnTlZIUk1CQWY4RUFqQUFNSUdyQmdOVkhSRUVnYU13Z2FDa2daMHdnWm94TnpBMUJnTlZCQVFNTGpFdFZGTlVmREl0VkZOVWZETXRNak0yT1RBNE5qZ3RNR1JsTXkxbU9EazNMVFZqWldVdFl6RmxZbVJsTURZeEh6QWRCZ29Ka2lhSmsvSXNaQUVCREE4ek1USTBNVGt4TnpBeE1EQXdNRE14RFRBTEJnTlZCQXdNQkRFeE1EQXhEekFOQmdOVkJCb01Ca3BsWkdSaGFERWVNQndHQTFVRUR3d1ZVbVZoYkNCbGMzUmhkR1VnWVdOMGFYWnBkR1Z6TUFvR0NDcUdTTTQ5QkFNQ0EwZ0FNRVVDSUV4TXZwMGVmV3NYUWFQYjEybklPYlNHdEtLRk8vdFVYcU1NWU85L1dhRURBaUVBMlBzNjkrTTZuWWVJV25JT0lHZGxIZFplTjJsMVk1K1ZnK0J2YnY5MkcvOD0=';
+  const publicKeyBytes = getPublicKeyBytesFromPem(PUBLICKEY);
+  const certSigBytes = getCertificateSignatureBytes(CERTSIGNER);
 
-  const publicKeyBytes = getPublicKeyBytes(certificateBase64);
-  const certSigBytes = getCertificateSignatureBytes(certificateBase64);
+  // 🔍 DEBUG CHECK
+  console.log('Signature length:', signatureRawBytes.length);
+  console.log('PublicKey length:', publicKeyBytes.length);
+  console.log(
+    'PublicKey hex:',
+    Array.from(publicKeyBytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join(''),
+  );
+  console.log('CertSignature length:', certSigBytes.length);
 
   const qrBase64 = buildQRPayload({
     sellerName: invoice.supplier.registrationName,
@@ -103,7 +120,7 @@ export async function createInvoicePipeline(
     total: totals.totalWithTax.toFixed(2),
     vat: totals.totalTax.toFixed(2),
     hash: invoiceHash.base64,
-    signature: signatureBase64,
+    signature: signatureRawBytes,
     publicKeyBytes,
     certSignatureBytes: certSigBytes,
   });
@@ -130,11 +147,20 @@ export async function createInvoicePipeline(
  */
 export async function saveInvoiceXML(invoiceNumber: string, xmlContent: string) {
   const dir = new Directory(Paths.document, 'zatca_invoices');
-  await dir.create({ intermediates: true });
 
-  const file = new File(dir, `Invoice_${invoiceNumber}.xml`);
+  const dirInfo = dir.info();
+  if (!dirInfo.exists) {
+    dir.create({ intermediates: true });
+  }
 
-  await file.write(xmlContent);
+  const file = new File(dir, `Invoice_${invoiceNumber}_${Date.now()}.xml`);
+
+  const fileInfo = file.info();
+  if (fileInfo.exists) {
+    file.delete();
+  }
+
+  file.write(xmlContent);
 
   console.log('Saved invoice XML:', file.uri);
 
