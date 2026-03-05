@@ -85,6 +85,8 @@ export interface InvoiceTotals {
   totalWithTax: number;
   /** totalWithTax − discount */
   payableAmount: number;
+  /** Tax exclusive amount after applying document-level discounts */
+  taxableAmount: number;
 }
 
 // ───────── Pipeline result ─────────

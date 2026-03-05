@@ -1,5 +1,4 @@
 import * as Crypto from 'expo-crypto';
-import { SignedXml } from 'xml-crypto';
 import { DOMParser, XMLSerializer } from 'xmldom';
 import * as xpath from 'xpath';
 
@@ -83,13 +82,9 @@ export async function generateSignedPropertiesHash(
 </xades:SignedSignatureProperties>
 </xades:SignedProperties>`;
 
-  const hashBytes = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, xml, {
-    encoding: Crypto.CryptoEncoding.HEX,
+  const base64Hash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, xml, {
+    encoding: Crypto.CryptoEncoding.BASE64,
   });
 
-  const utf8Bytes = new TextEncoder().encode(hashBytes);
-
-  const base64 = btoa(String.fromCharCode(...utf8Bytes));
-
-  return base64;
+  return base64Hash;
 }

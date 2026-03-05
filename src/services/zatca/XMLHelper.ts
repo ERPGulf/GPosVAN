@@ -21,12 +21,14 @@ const NS = {
 
 /* ─── XML Escaper ─── */
 function esc(value: string): string {
-  return value
-    ?.replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;') ?? '';
+  return (
+    value
+      ?.replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;') ?? ''
+  );
 }
 
 /* ====================================================================
@@ -34,11 +36,7 @@ function esc(value: string): string {
  * ==================================================================== */
 
 export function buildInvoiceXML(invoice: Invoice): string {
-  const totals = calculateTotals(
-    invoice.items,
-    invoice.isTaxIncludedInPrice,
-    invoice.discount,
-  );
+  const totals = calculateTotals(invoice.items, invoice.isTaxIncludedInPrice, invoice.discount);
 
   const f = (n: number) => n.toFixed(2);
   const cur = invoice.currency;
@@ -100,9 +98,7 @@ export function buildInvoiceXML(invoice: Invoice): string {
   xml += `
   <cac:Signature>
     <cbc:ID>urn:oasis:names:specification:ubl:signature:Invoice</cbc:ID>
-    <cbc:SignatureMethod>
-      urn:oasis:names:specification:ubl:dsig:enveloped:xades
-    </cbc:SignatureMethod>
+    <cbc:SignatureMethod>urn:oasis:names:specification:ubl:dsig:enveloped:xades</cbc:SignatureMethod>
   </cac:Signature>`;
 
   /* ── Supplier ── */
@@ -124,7 +120,7 @@ export function buildInvoiceXML(invoice: Invoice): string {
   </cac:PaymentMeans>`;
 
   /* ── AllowanceCharge ── */
-  xml += buildAllowanceCharge(invoice, totals.totalTax);
+  xml += buildAllowanceCharge(invoice);
 
   /* ── TaxTotal ── */
   xml += `
@@ -132,7 +128,7 @@ export function buildInvoiceXML(invoice: Invoice): string {
     <cbc:TaxAmount currencyID="${cur}">${f(totals.totalTax)}</cbc:TaxAmount>
   </cac:TaxTotal>`;
 
-  xml += buildTaxTotalWithSubtotal(totals.totalTax, totals.subtotal, cur);
+  xml += buildTaxTotalWithSubtotal(totals.totalTax, totals.taxableAmount, cur);
 
   /* ── LegalMonetaryTotal ── */
   xml += buildLegalMonetaryTotal(totals, invoice.discount, cur);
@@ -165,7 +161,7 @@ function buildSupplierParty(invoice: Invoice): string {
         <cbc:PlotIdentification>${esc(s.address.plotIdentification)}</cbc:PlotIdentification>
         <cbc:CitySubdivisionName>${esc(s.address.citySubdivision)}</cbc:CitySubdivisionName>
         <cbc:CityName>${esc(s.address.city)}</cbc:CityName>
-        <cbc:PostalZone>${esc(s.address.postalZone || '000000')}</cbc:PostalZone>
+        <cbc:PostalZone>${esc((s.address.postalZone || '00000').substring(0, 5))}</cbc:PostalZone>
         <cbc:CountrySubentity>${esc(s.address.countrySubentity)}</cbc:CountrySubentity>
         <cac:Country>
           <cbc:IdentificationCode>${esc(s.address.countryCode)}</cbc:IdentificationCode>
@@ -205,15 +201,14 @@ function buildCustomerParty(invoice: Invoice): string {
   </cac:AccountingCustomerParty>`;
 }
 
-function buildAllowanceCharge(invoice: Invoice, totalTax: number): string {
+function buildAllowanceCharge(invoice: Invoice): string {
+  if (invoice.discount <= 0) return '';
   return `
   <cac:AllowanceCharge>
     <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
     <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>
     <cbc:AllowanceChargeReason>Discount</cbc:AllowanceChargeReason>
-    <cbc:Amount currencyID="${invoice.currency}">
-      ${invoice.discount.toFixed(2)}
-    </cbc:Amount>
+    <cbc:Amount currencyID="${invoice.currency}">${invoice.discount.toFixed(2)}</cbc:Amount>
     <cac:TaxCategory>
       <cbc:ID>S</cbc:ID>
       <cbc:Percent>15.00</cbc:Percent>
@@ -221,21 +216,15 @@ function buildAllowanceCharge(invoice: Invoice, totalTax: number): string {
         <cbc:ID>VAT</cbc:ID>
       </cac:TaxScheme>
     </cac:TaxCategory>
-  </cac:AllowanceCharge>
-
-  <cac:TaxTotal>
-    <cbc:TaxAmount currencyID="${invoice.currency}">
-      ${totalTax.toFixed(2)}
-    </cbc:TaxAmount>
-  </cac:TaxTotal>`;
+  </cac:AllowanceCharge>`;
 }
 
-function buildTaxTotalWithSubtotal(totalTax: number, subtotal: number, cur: string): string {
+function buildTaxTotalWithSubtotal(totalTax: number, taxableAmount: number, cur: string): string {
   return `
   <cac:TaxTotal>
     <cbc:TaxAmount currencyID="${cur}">${totalTax.toFixed(2)}</cbc:TaxAmount>
     <cac:TaxSubtotal>
-      <cbc:TaxableAmount currencyID="${cur}">${subtotal.toFixed(2)}</cbc:TaxableAmount>
+      <cbc:TaxableAmount currencyID="${cur}">${taxableAmount.toFixed(2)}</cbc:TaxableAmount>
       <cbc:TaxAmount currencyID="${cur}">${totalTax.toFixed(2)}</cbc:TaxAmount>
       <cac:TaxCategory>
         <cbc:ID>S</cbc:ID>
@@ -258,7 +247,7 @@ function buildLegalMonetaryTotal(
   return `
   <cac:LegalMonetaryTotal>
     <cbc:LineExtensionAmount currencyID="${cur}">${f(totals.subtotal)}</cbc:LineExtensionAmount>
-    <cbc:TaxExclusiveAmount currencyID="${cur}">${f(totals.subtotal)}</cbc:TaxExclusiveAmount>
+    <cbc:TaxExclusiveAmount currencyID="${cur}">${f(totals.taxableAmount)}</cbc:TaxExclusiveAmount>
     <cbc:TaxInclusiveAmount currencyID="${cur}">${f(totals.totalWithTax)}</cbc:TaxInclusiveAmount>
     <cbc:AllowanceTotalAmount currencyID="${cur}">${f(discount)}</cbc:AllowanceTotalAmount>
     <cbc:PayableAmount currencyID="${cur}">${f(totals.payableAmount)}</cbc:PayableAmount>
@@ -269,29 +258,21 @@ function buildInvoiceLines(invoice: Invoice): string {
   const cur = invoice.currency;
   const f = (n: number) => n.toFixed(2);
 
-  return invoice.items.map((item, i) => {
-    const { lineExtension, tax } =
-      calculateItemAmounts(item, invoice.isTaxIncludedInPrice);
+  return invoice.items
+    .map((item, i) => {
+      const { lineExtension, tax } = calculateItemAmounts(item, invoice.isTaxIncludedInPrice);
 
-    const unitPrice = invoice.isTaxIncludedInPrice
-      ? lineExtension / item.quantity
-      : item.price;
+      const unitPrice = invoice.isTaxIncludedInPrice ? lineExtension / item.quantity : item.price;
 
-    return `
+      return `
     <cac:InvoiceLine>
       <cbc:ID>${i + 1}</cbc:ID>
-      <cbc:InvoicedQuantity unitCode="${item.unitOfMeasure}">
-        ${f(item.quantity)}
-      </cbc:InvoicedQuantity>
-      <cbc:LineExtensionAmount currencyID="${cur}">
-        ${f(lineExtension)}
-      </cbc:LineExtensionAmount>
+      <cbc:InvoicedQuantity unitCode="${item.unitOfMeasure}">${f(item.quantity)}</cbc:InvoicedQuantity>
+      <cbc:LineExtensionAmount currencyID="${cur}">${f(lineExtension)}</cbc:LineExtensionAmount>
 
       <cac:TaxTotal>
         <cbc:TaxAmount currencyID="${cur}">${f(tax)}</cbc:TaxAmount>
-        <cbc:RoundingAmount currencyID="${cur}">
-          ${f(lineExtension + tax)}
-        </cbc:RoundingAmount>
+        <cbc:RoundingAmount currencyID="${cur}">${f(lineExtension + tax)}</cbc:RoundingAmount>
       </cac:TaxTotal>
 
       <cac:Item>
@@ -306,12 +287,11 @@ function buildInvoiceLines(invoice: Invoice): string {
       </cac:Item>
 
       <cac:Price>
-        <cbc:PriceAmount currencyID="${cur}">
-          ${f(unitPrice)}
-        </cbc:PriceAmount>
+        <cbc:PriceAmount currencyID="${cur}">${f(unitPrice)}</cbc:PriceAmount>
       </cac:Price>
     </cac:InvoiceLine>`;
-  }).join('');
+    })
+    .join('');
 }
 export function injectQRData(xml: string, qrBase64: string): string {
   return xml.replace('PLACEHOLDER_QR', qrBase64);
@@ -327,32 +307,25 @@ export function injectUBLExtensions(
   issuerName: string,
   serialNumber: string,
 ): string {
-
   const extBlock = `
   <ext:UBLExtensions>
     <ext:UBLExtension>
-      <ext:ExtensionURI>
-        urn:oasis:names:specification:ubl:dsig:enveloped:xades
-      </ext:ExtensionURI>
+      <ext:ExtensionURI>urn:oasis:names:specification:ubl:dsig:enveloped:xades</ext:ExtensionURI>
       <ext:ExtensionContent>
         <sig:UBLDocumentSignatures>
           <sac:SignatureInformation>
-            <cbc:ID>
-              urn:oasis:names:specification:ubl:signature:1
-            </cbc:ID>
-            <sbc:ReferencedSignatureID>
-              urn:oasis:names:specification:ubl:signature:Invoice
-            </sbc:ReferencedSignatureID>
+            <cbc:ID>urn:oasis:names:specification:ubl:signature:1</cbc:ID>
+            <sbc:ReferencedSignatureID>urn:oasis:names:specification:ubl:signature:Invoice</sbc:ReferencedSignatureID>
             ${buildDSSignature(
-    invoiceHashBase64,
-    signedPropsHash,
-    signatureValueBase64,
-    certificateBody,
-    signingTime,
-    certificateDigest,
-    issuerName,
-    serialNumber
-  )}
+              invoiceHashBase64,
+              signedPropsHash,
+              signatureValueBase64,
+              certificateBody,
+              signingTime,
+              certificateDigest,
+              issuerName,
+              serialNumber,
+            )}
           </sac:SignatureInformation>
         </sig:UBLDocumentSignatures>
       </ext:ExtensionContent>
@@ -360,10 +333,7 @@ export function injectUBLExtensions(
   </ext:UBLExtensions>
   `;
 
-  return xml.replace(
-    /<Invoice[\s\S]*?>/,
-    match => match + extBlock
-  );
+  return xml.replace(/<Invoice[\s\S]*?>/, (match) => match + extBlock);
 }
 function buildDSSignature(
   invoiceHash: string,
@@ -375,7 +345,6 @@ function buildDSSignature(
   issuerName: string,
   serialNumber: string,
 ): string {
-
   return `
   <ds:Signature Id="signature">
 

@@ -17,18 +17,15 @@ import * as Crypto from 'expo-crypto';
  * SHA-256 digest of the raw certificate bytes, returned as base-64.
  */
 export async function getCertificateDigestValue(certBase64: string): Promise<string> {
-  // Decode certificate to DER
   const certBytes = decodeCertificate(certBase64);
 
-  // SHA256 hash of DER
   const hashBuffer = await Crypto.digest(
     Crypto.CryptoDigestAlgorithm.SHA256,
-    certBytes.buffer as ArrayBuffer,
+    certBytes as unknown as BufferSource,
   );
 
   const hashBytes = new Uint8Array(hashBuffer);
 
-  // Return Base64 of raw hash (NOT hex)
   return bytesToBase64(hashBytes);
 }
 /**
@@ -36,16 +33,17 @@ export async function getCertificateDigestValue(certBase64: string): Promise<str
  * Example: "CN=TSZEINVOICE-SubCA-1, DC=extgazt, DC=gov, DC=local"
  */
 export function getCertificateIssuer(certBase64: string): string {
-  const der = base64ToBytes(certBase64);
+  const der = decodeCertificate(certBase64);
   const tbsCert = parseTBSCertificate(der);
-  return formatDN(tbsCert.issuer);
+  // ZATCA expects Reverse order for Issuer Name: DC=..., DC=..., OU=..., O=..., C=...
+  return formatDN(tbsCert.issuer.reverse());
 }
 
 /**
  * Extract the certificate serial number as a decimal string.
  */
 export function getSerialNumber(certBase64: string): string {
-  const der = base64ToBytes(certBase64);
+  const der = decodeCertificate(certBase64);
   const tbsCert = parseTBSCertificate(der);
   return tbsCert.serialNumber;
 }
@@ -54,7 +52,7 @@ export function getSerialNumber(certBase64: string): string {
  * Raw SubjectPublicKeyInfo bytes (for QR tag 8).
  */
 export function getPublicKeyBytes(certBase64: string): Uint8Array {
-  const der = base64ToBytes(certBase64);
+  const der = decodeCertificate(certBase64);
   const tbsCert = parseTBSCertificate(der);
   return tbsCert.publicKeyBytes;
 }

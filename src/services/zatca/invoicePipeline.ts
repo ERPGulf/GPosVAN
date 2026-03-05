@@ -6,12 +6,12 @@ import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 
 import {
-  base64ToBytes,
+  bytesToBase64,
+  decodeCertificate,
   getCertificateDigestValue,
   getCertificateIssuer,
   getCertificateSignatureBytes,
   getPublicKeyBytes,
-  getPublicKeyBytesFromPem,
   getSerialNumber,
 } from './certificate';
 import { generateInvoiceHash, generateSignedPropertiesHash } from './hash';
@@ -68,18 +68,13 @@ export async function createInvoicePipeline(
   );
 
   /* ── 6. Get the raw certificate body (for X509Certificate element) ── */
-  // The certificate might be double-base64 encoded (like in C#), decode once
-  let certificateBody: string;
-  try {
-    const decoded = new TextDecoder().decode(base64ToBytes(certificateBase64));
-    // If decoded result looks like base-64, use it directly; otherwise use original
-    certificateBody = /^[A-Za-z0-9+/=\s]+$/.test(decoded.trim())
-      ? decoded.trim()
-      : certificateBase64;
-  } catch {
-    certificateBody = certificateBase64;
-  }
+  const certificateBody = bytesToBase64(decodeCertificate(certificateBase64));
 
+  /* ── 6. Get certificate body for XML ── */
+  // const certificateBody = certificateBase64
+  //   .replace(/-----BEGIN CERTIFICATE-----/g, '')
+  //   .replace(/-----END CERTIFICATE-----/g, '')
+  //   .replace(/\s+/g, '');
   /* ── 7. Inject UBL extensions ── */
   const xmlWithExtensions = injectUBLExtensions(
     baseXml,
@@ -95,12 +90,16 @@ export async function createInvoicePipeline(
 
   /* ── 8. Build QR payload ── */
   const totals = calculateTotals(invoice.items, invoice.isTaxIncludedInPrice, invoice.discount);
-  const PUBLICKEY =
-    'LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZZd0VBWUhLb1pJemowQ0FRWUZLNEVFQUFvRFFnQUVnT0xiQzNSWWlnZUJFSG5aYTBWMVFTMmk2VW03SURLdQpEa3JFb1VYNGlVekMxalRJNjA4dnM5NkdPekFrQmd3UGRZQXoxNnNnVVVLRlBUR3phZCtZR1E9PQotLS0tLUVORCBQVUJMSUMgS0VZLS0tLS0=';
-  const CERTSIGNER =
-    'TUlJQ09EQ0NBZDZnQXdJQkFnSUdBWmhDcHo5Y01Bb0dDQ3FHU000OUJBTUNNQlV4RXpBUkJnTlZCQU1NQ21WSmJuWnZhV05wYm1jd0hoY05NalV3TnpJMU1UY3pOVEE0V2hjTk16QXdOekkwTWpFd01EQXdXakJ5TVFzd0NRWURWUVFHRXdKVFFURVlNQllHQTFVRUN3d1BNekV5TkRFNU1UY3dNVEF3TURBek1TRXdId1lEVlFRS0RCaEtZWGRoWkNCQmJHUnBZV1poSUZSeVlXUnBibWNnUTI4eEpqQWtCZ05WQkFNTUhWUlRWQzA0T0RZME16RXhORFV0TXpFeU5ERTVNVGN3TVRBd01EQXpNRll3RUFZSEtvWkl6ajBDQVFZRks0RUVBQW9EUWdBRW56VVI3V1BTTVhQSGpGUElNcVpWTjlDQ1AyN2FmazZyaTlhUDVONUFKNkR1MUNBbTU4RWk2WnFFamEwelljZW9nL1JEWjlNZWRYS2FvN1JwUS9WZlc2T0J2ekNCdkRBTUJnTlZIUk1CQWY4RUFqQUFNSUdyQmdOVkhSRUVnYU13Z2FDa2daMHdnWm94TnpBMUJnTlZCQVFNTGpFdFZGTlVmREl0VkZOVWZETXRNak0yT1RBNE5qZ3RNR1JsTXkxbU9EazNMVFZqWldVdFl6RmxZbVJsTURZeEh6QWRCZ29Ka2lhSmsvSXNaQUVCREE4ek1USTBNVGt4TnpBeE1EQXdNRE14RFRBTEJnTlZCQXdNQkRFeE1EQXhEekFOQmdOVkJCb01Ca3BsWkdSaGFERWVNQndHQTFVRUR3d1ZVbVZoYkNCbGMzUmhkR1VnWVdOMGFYWnBkR1Z6TUFvR0NDcUdTTTQ5QkFNQ0EwZ0FNRVVDSUV4TXZwMGVmV3NYUWFQYjEybklPYlNHdEtLRk8vdFVYcU1NWU85L1dhRURBaUVBMlBzNjkrTTZuWWVJV25JT0lHZGxIZFplTjJsMVk1K1ZnK0J2YnY5MkcvOD0=';
-  const publicKeyBytes = getPublicKeyBytesFromPem(PUBLICKEY);
-  const certSigBytes = getCertificateSignatureBytes(CERTSIGNER);
+  // const PUBLICKEY =
+  //   'LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZZd0VBWUhLb1pJemowQ0FRWUZLNEVFQUFvRFFnQUVnT0xiQzNSWWlnZUJFSG5aYTBWMVFTMmk2VW03SURLdQpEa3JFb1VYNGlVekMxalRJNjA4dnM5NkdPekFrQmd3UGRZQXoxNnNnVVVLRlBUR3phZCtZR1E9PQotLS0tLUVORCBQVUJMSUMgS0VZLS0tLS0=';
+  // const CERTSIGNER =
+  //   'TUlJQ09EQ0NBZDZnQXdJQkFnSUdBWmhDcHo5Y01Bb0dDQ3FHU000OUJBTUNNQlV4RXpBUkJnTlZCQU1NQ21WSmJuWnZhV05wYm1jd0hoY05NalV3TnpJMU1UY3pOVEE0V2hjTk16QXdOekkwTWpFd01EQXdXakJ5TVFzd0NRWURWUVFHRXdKVFFURVlNQllHQTFVRUN3d1BNekV5TkRFNU1UY3dNVEF3TURBek1TRXdId1lEVlFRS0RCaEtZWGRoWkNCQmJHUnBZV1poSUZSeVlXUnBibWNnUTI4eEpqQWtCZ05WQkFNTUhWUlRWQzA0T0RZME16RXhORFV0TXpFeU5ERTVNVGN3TVRBd01EQXpNRll3RUFZSEtvWkl6ajBDQVFZRks0RUVBQW9EUWdBRW56VVI3V1BTTVhQSGpGUElNcVpWTjlDQ1AyN2FmazZyaTlhUDVONUFKNkR1MUNBbTU4RWk2WnFFamEwelljZW9nL1JEWjlNZWRYS2FvN1JwUS9WZlc2T0J2ekNCdkRBTUJnTlZIUk1CQWY4RUFqQUFNSUdyQmdOVkhSRUVnYU13Z2FDa2daMHdnWm94TnpBMUJnTlZCQVFNTGpFdFZGTlVmREl0VkZOVWZETXRNak0yT1RBNE5qZ3RNR1JsTXkxbU9EazNMVFZqWldVdFl6RmxZbVJsTURZeEh6QWRCZ29Ka2lhSmsvSXNaQUVCREE4ek1USTBNVGt4TnpBeE1EQXdNRE14RFRBTEJnTlZCQXdNQkRFeE1EQXhEekFOQmdOVkJCb01Ca3BsWkdSaGFERWVNQndHQTFVRUR3d1ZVbVZoYkNCbGMzUmhkR1VnWVdOMGFYWnBkR1Z6TUFvR0NDcUdTTTQ5QkFNQ0EwZ0FNRVVDSUV4TXZwMGVmV3NYUWFQYjEybklPYlNHdEtLRk8vdFVYcU1NWU85L1dhRURBaUVBMlBzNjkrTTZuWWVJV25JT0lHZGxIZFplTjJsMVk1K1ZnK0J2YnY5MkcvOD0=';
+  // const publicKeyBytes = getPublicKeyBytesFromPem(PUBLICKEY);
+  // const certSigBytes = getCertificateSignatureBytes(CERTSIGNER);
+  /* ── 8. Build QR payload ── */
+
+  const publicKeyBytes = getPublicKeyBytes(certificateBase64);
+  const certSigBytes = getCertificateSignatureBytes(certificateBase64);
 
   // 🔍 DEBUG CHECK
   console.log('Signature length:', signatureRawBytes.length);

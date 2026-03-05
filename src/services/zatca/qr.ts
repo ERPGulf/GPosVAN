@@ -2,8 +2,8 @@
 /*  ZATCA E-Invoicing – QR TLV payload builder                        */
 /* ------------------------------------------------------------------ */
 
-import { bytesToBase64 } from './certificate';
-import { encodeTLV, encodeTLVBytes, encodeTLVRaw } from './tlv';
+import { base64ToBytes, bytesToBase64 } from './certificate';
+import { encodeTLV, encodeTLVBytes } from './tlv';
 
 export interface QRPayloadInput {
   sellerName: string;
@@ -27,7 +27,7 @@ export function buildQRPayload(data: QRPayloadInput): string {
     encodeTLV(3, data.timestamp),
     encodeTLV(4, data.total),
     encodeTLV(5, data.vat),
-    encodeTLV(6, data.hash),
+    encodeTLVBytes(6, base64ToBytes(data.hash)),
     encodeTLVBytes(7, data.signature),
     encodeTLVBytes(8, data.publicKeyBytes),
     encodeTLVBytes(9, data.certSignatureBytes),

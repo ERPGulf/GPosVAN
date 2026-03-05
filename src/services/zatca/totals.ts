@@ -42,21 +42,21 @@ export function calculateTotals(
   discount: number = 0,
 ): InvoiceTotals {
   let subtotal = 0;
-  let totalTax = 0;
 
   for (const item of items) {
-    const { lineExtension, tax } = calculateItemAmounts(item, isTaxIncludedInPrice);
+    const { lineExtension } = calculateItemAmounts(item, isTaxIncludedInPrice);
     subtotal += lineExtension;
-    totalTax += tax;
   }
 
   subtotal = round2(subtotal);
-  totalTax = round2(totalTax);
 
-  const totalWithTax = round2(subtotal + totalTax);
-  const payableAmount = round2(totalWithTax - discount);
+  const taxableAmount = round2(subtotal - discount);
+  const totalTax = round2(taxableAmount * 0.15); // ZATCA allows 15% standard rate
 
-  return { subtotal, totalTax, totalWithTax, payableAmount };
+  const totalWithTax = round2(taxableAmount + totalTax);
+  const payableAmount = round2(totalWithTax);
+
+  return { subtotal, totalTax, totalWithTax, payableAmount, taxableAmount };
 }
 
 /* ─── helper ─── */
