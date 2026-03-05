@@ -8,25 +8,33 @@
 
 import { ec as EC } from 'elliptic';
 import * as Crypto from 'expo-crypto';
+import { EC_CURVE } from './constants';
 
-/* ====================================================================
- * Public API
- * ==================================================================== */
-
-/**
- * SHA-256 digest of the raw certificate bytes, returned as base-64.
- */
 export async function getCertificateDigestValue(certBase64: string): Promise<string> {
-  const certBytes = decodeCertificate(certBase64);
+  // ZATCA: hash the cleaned base64 certificate body string (not DER bytes)
+  // Then SHA-256 → hex → base64(hex)
+  const cleanCertBody = getCleanCertBody(certBase64);
 
-  const hashBuffer = await Crypto.digest(
+  const hexHash = await Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,
-    certBytes as unknown as BufferSource,
+    cleanCertBody,
+    { encoding: Crypto.CryptoEncoding.HEX },
   );
 
-  const hashBytes = new Uint8Array(hashBuffer);
+  // base64-encode the hex string
+  return bytesToBase64(new TextEncoder().encode(hexHash));
+}
 
-  return bytesToBase64(hashBytes);
+/**
+ * Extract the clean base64 certificate body (no PEM headers, no newlines).
+ */
+export function getCleanCertBody(certBase64: string): string {
+  const pem = new TextDecoder().decode(base64ToBytes(certBase64));
+  return pem
+    .replace('-----BEGIN CERTIFICATE-----', '')
+    .replace('-----END CERTIFICATE-----', '')
+    .replace(/\n/g, '')
+    .trim();
 }
 /**
  * Extract the issuer distinguished-name as a human-readable string.
@@ -335,8 +343,9 @@ export function base64ToBytes(b64: string): Uint8Array {
   for (let i = 0; i < len; i += 4) {
     const a = B64.indexOf(clean[i]);
     const b = B64.indexOf(clean[i + 1]);
-    const c = B64.indexOf(clean[i + 2]);
-    const d = B64.indexOf(clean[i + 3]);
+    // Treat '=' padding as 0 — indexOf('=') returns -1 which corrupts bitwise OR
+    const c = clean[i + 2] === '=' ? 0 : B64.indexOf(clean[i + 2]);
+    const d = clean[i + 3] === '=' ? 0 : B64.indexOf(clean[i + 3]);
     const bits = (a << 18) | (b << 12) | (c << 6) | d;
     if (j < byteLen) arr[j++] = (bits >> 16) & 0xff;
     if (j < byteLen) arr[j++] = (bits >> 8) & 0xff;
@@ -406,7 +415,7 @@ export async function signHashWithECDSABytes(
   privateKeyPem: string,
 ): Promise<Uint8Array> {
   const pkBytes = extractECPrivateKey(privateKeyPem);
-  const ec = new EC('p256');
+  const ec = new EC(EC_CURVE);
   const keyPair = ec.keyFromPrivate(pkBytes);
 
   // Replicating C# Encoding.UTF8.GetBytes(hashHex)

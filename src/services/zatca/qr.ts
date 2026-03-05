@@ -2,7 +2,7 @@
 /*  ZATCA E-Invoicing – QR TLV payload builder                        */
 /* ------------------------------------------------------------------ */
 
-import { base64ToBytes, bytesToBase64 } from './certificate';
+import { bytesToBase64 } from './certificate';
 import { encodeTLV, encodeTLVBytes } from './tlv';
 
 export interface QRPayloadInput {
@@ -12,13 +12,20 @@ export interface QRPayloadInput {
   total: string;
   vat: string;
   hash: string; // base-64 invoice hash
-  signature: Uint8Array; // base-64 signature
+  signatureBase64: string; // base-64 digital signature
   publicKeyBytes: Uint8Array; // raw bytes for tag 8
   certSignatureBytes: Uint8Array; // raw bytes for tag 9
 }
 
 /**
  * Build the ZATCA QR TLV payload and return it as a base-64 string.
+ *
+ * ZATCA TLV encoding:
+ *  - Tags 1-5: UTF-8 string values
+ *  - Tag 6: invoice hash as string (base64 hash encoded as UTF-8 bytes)
+ *  - Tag 7: digital signature as string (base64 signature encoded as UTF-8 bytes)
+ *  - Tag 8: raw public key bytes
+ *  - Tag 9: raw certificate signature bytes
  */
 export function buildQRPayload(data: QRPayloadInput): string {
   const tags: Uint8Array[] = [
@@ -27,8 +34,8 @@ export function buildQRPayload(data: QRPayloadInput): string {
     encodeTLV(3, data.timestamp),
     encodeTLV(4, data.total),
     encodeTLV(5, data.vat),
-    encodeTLVBytes(6, base64ToBytes(data.hash)),
-    encodeTLVBytes(7, data.signature),
+    encodeTLV(6, data.hash), // base64 string as UTF-8 bytes
+    encodeTLV(7, data.signatureBase64), // base64 string as UTF-8 bytes
     encodeTLVBytes(8, data.publicKeyBytes),
     encodeTLVBytes(9, data.certSignatureBytes),
   ];

@@ -1,31 +1,58 @@
 /* ------------------------------------------------------------------ */
-/*  ZATCA E-Invoicing – ECDSA signing (secp256r1 / P-256)             */
+/*  ZATCA E-Invoicing – ECDSA signing (secp256k1)                      */
+/*                                                                      */
+/*  Replicates C# SignHashWithECDSA / SignData logic:                   */
+/*    1. Take hex hash string                                           */
+/*    2. Encoding.UTF8.GetBytes(hashHex) → UTF-8 bytes                  */
+/*    3. SignerUtilities.GetSigner("SHA-256withECDSA")                   */
+/*       → internally SHA-256 hashes the input, then ECDSA signs        */
 /* ------------------------------------------------------------------ */
 
 import { ec as EC } from 'elliptic';
-import { base64ToBytes, bytesToBase64 } from './certificate';
+import * as Crypto from 'expo-crypto';
+import { base64ToBytes, bytesToBase64, extractECPrivateKey } from './certificate';
+import { EC_CURVE } from './constants';
 
-// ZATCA mandates ECDSA with P-256 (secp256r1), NOT secp256k1
-const ec = new EC('p256');
+// ZATCA mandates ECDSA with secp256k1
+const ec = new EC(EC_CURVE);
 
 /**
- * Sign a SHA-256 hash (hex string) with the ECDSA private key.
+ * Sign an invoice hash with the ECDSA private key.
+ *
+ * Matches C# CertificateUtils.SignHashWithECDSABytes:
+ *   var bytes = Encoding.UTF8.GetBytes(hashHex);   // hex string → UTF-8 bytes
+ *   SignData(pk, bytes);                             // SHA-256withECDSA
+ *
+ * SHA-256withECDSA = SHA256(input) then ECDSA sign the hash.
+ * elliptic's key.sign() expects a pre-computed hash, so we SHA-256 first.
  *
  * Returns:
  *  - `derBase64`: base-64 of the DER-encoded signature (for XML SignatureValue)
- *  - `rawBytes`:  raw signature bytes (for QR tag 7)
+ *  - `rawBytes`:  raw DER signature bytes
  */
-export function signHash(
-  hashHex: string,
+export async function signHash(
+  hexHash: string,
   privateKeyBase64: string,
-): { derBase64: string; rawBytes: Uint8Array } {
-  const pkBytes = base64ToBytes(privateKeyBase64);
+): Promise<{ derBase64: string; rawBytes: Uint8Array }> {
+  // Step 1+2: SHA-256 hash the hex hash string
+  // (C#: Encoding.UTF8.GetBytes(hashHex) → SHA-256withECDSA internally hashes)
+  // Using digestStringAsync to avoid Hermes TypedArray compatibility issues
+  const hashHex2 = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, hexHash, {
+    encoding: Crypto.CryptoEncoding.HEX,
+  });
+
+  // Convert hex hash result to bytes for ECDSA signing
+  const hashBytes = new Uint8Array(
+    (hashHex2.match(/.{2}/g) || []).map((byte) => parseInt(byte, 16)),
+  );
+
+  // Step 3: ECDSA sign the SHA-256 result
+  const pkBytes = extractECPrivateKey(new TextDecoder().decode(base64ToBytes(privateKeyBase64)));
   const key = ec.keyFromPrivate(Array.from(pkBytes));
 
-  const sig = key.sign(hashHex, 'hex');
-  const derArray = sig.toDER(); // number[]
+  const sig = key.sign(Array.from(hashBytes));
+  const derBytes = new Uint8Array(sig.toDER());
 
-  const derBytes = new Uint8Array(derArray);
   return {
     derBase64: bytesToBase64(derBytes),
     rawBytes: derBytes,

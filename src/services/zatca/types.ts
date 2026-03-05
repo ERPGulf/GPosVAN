@@ -89,6 +89,12 @@ export interface InvoiceTotals {
   taxableAmount: number;
 }
 
+// ───────── Sales Return / Credit Note ─────────
+export interface SalesReturnInvoice extends Invoice {
+  /** ID of the original invoice being returned / credited */
+  billingReferenceId: string;
+}
+
 // ───────── Pipeline result ─────────
 export interface InvoiceResult {
   xml: string;

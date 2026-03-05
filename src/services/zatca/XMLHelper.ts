@@ -3,24 +3,12 @@
 /*  Replaces xmlbuilder2 with deterministic string builder            */
 /* ------------------------------------------------------------------ */
 
+import { NS } from './constants';
 import { calculateItemAmounts, calculateTotals } from './totals';
 import type { Invoice } from './types';
 
-/* ─── Namespace URIs ─── */
-const NS = {
-  ubl: 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2',
-  cac: 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2',
-  cbc: 'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2',
-  ext: 'urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2',
-  sig: 'urn:oasis:names:specification:ubl:schema:xsd:CommonSignatureComponents-2',
-  sac: 'urn:oasis:names:specification:ubl:schema:xsd:SignatureAggregateComponents-2',
-  sbc: 'urn:oasis:names:specification:ubl:schema:xsd:SignatureBasicComponents-2',
-  ds: 'http://www.w3.org/2000/09/xmldsig#',
-  xades: 'http://uri.etsi.org/01903/v1.3.2#',
-} as const;
-
 /* ─── XML Escaper ─── */
-function esc(value: string): string {
+export function esc(value: string): string {
   return (
     value
       ?.replace(/&/g, '&amp;')
@@ -145,7 +133,7 @@ export function buildInvoiceXML(invoice: Invoice): string {
    Everything below remains identical logic but converted to string
    ==================================================================== */
 
-function buildSupplierParty(invoice: Invoice): string {
+export function buildSupplierParty(invoice: Invoice): string {
   const s = invoice.supplier;
 
   return `
@@ -182,7 +170,7 @@ function buildSupplierParty(invoice: Invoice): string {
   </cac:AccountingSupplierParty>`;
 }
 
-function buildCustomerParty(invoice: Invoice): string {
+export function buildCustomerParty(invoice: Invoice): string {
   const c = invoice.customer;
 
   return `
@@ -201,7 +189,7 @@ function buildCustomerParty(invoice: Invoice): string {
   </cac:AccountingCustomerParty>`;
 }
 
-function buildAllowanceCharge(invoice: Invoice): string {
+export function buildAllowanceCharge(invoice: Invoice): string {
   if (invoice.discount <= 0) return '';
   return `
   <cac:AllowanceCharge>
@@ -219,7 +207,11 @@ function buildAllowanceCharge(invoice: Invoice): string {
   </cac:AllowanceCharge>`;
 }
 
-function buildTaxTotalWithSubtotal(totalTax: number, taxableAmount: number, cur: string): string {
+export function buildTaxTotalWithSubtotal(
+  totalTax: number,
+  taxableAmount: number,
+  cur: string,
+): string {
   return `
   <cac:TaxTotal>
     <cbc:TaxAmount currencyID="${cur}">${totalTax.toFixed(2)}</cbc:TaxAmount>
@@ -237,7 +229,7 @@ function buildTaxTotalWithSubtotal(totalTax: number, taxableAmount: number, cur:
   </cac:TaxTotal>`;
 }
 
-function buildLegalMonetaryTotal(
+export function buildLegalMonetaryTotal(
   totals: ReturnType<typeof calculateTotals>,
   discount: number,
   cur: string,
@@ -254,7 +246,7 @@ function buildLegalMonetaryTotal(
   </cac:LegalMonetaryTotal>`;
 }
 
-function buildInvoiceLines(invoice: Invoice): string {
+export function buildInvoiceLines(invoice: Invoice): string {
   const cur = invoice.currency;
   const f = (n: number) => n.toFixed(2);
 
@@ -335,7 +327,7 @@ export function injectUBLExtensions(
 
   return xml.replace(/<Invoice[\s\S]*?>/, (match) => match + extBlock);
 }
-function buildDSSignature(
+export function buildDSSignature(
   invoiceHash: string,
   signedPropsHash: string,
   signatureValue: string,
@@ -388,27 +380,24 @@ function buildDSSignature(
     </ds:KeyInfo>
 
     <ds:Object>
-      <xades:QualifyingProperties Target="signature">
-        <xades:SignedProperties Id="xadesSignedProperties">
-          <xades:SignedSignatureProperties>
-
-            <xades:SigningTime>${signingTime}</xades:SigningTime>
-
-            <xades:SigningCertificate>
-              <xades:Cert>
-                <xades:CertDigest>
-                  <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
-                  <ds:DigestValue>${certificateDigest}</ds:DigestValue>
-                </xades:CertDigest>
-                <xades:IssuerSerial>
-                  <ds:X509IssuerName>${issuerName}</ds:X509IssuerName>
-                  <ds:X509SerialNumber>${serialNumber}</ds:X509SerialNumber>
-                </xades:IssuerSerial>
-              </xades:Cert>
-            </xades:SigningCertificate>
-
-          </xades:SignedSignatureProperties>
-        </xades:SignedProperties>
+      <xades:QualifyingProperties xmlns:xades="http://uri.etsi.org/01903/v1.3.2#" Target="signature">
+                                <xades:SignedProperties Id="xadesSignedProperties">
+                                    <xades:SignedSignatureProperties>
+                                        <xades:SigningTime>${signingTime}</xades:SigningTime>
+                                        <xades:SigningCertificate>
+                                            <xades:Cert>
+                                                <xades:CertDigest>
+                                                    <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
+                                                    <ds:DigestValue>${certificateDigest}</ds:DigestValue>
+                                                </xades:CertDigest>
+                                                <xades:IssuerSerial>
+                                                    <ds:X509IssuerName>${issuerName}</ds:X509IssuerName>
+                                                    <ds:X509SerialNumber>${serialNumber}</ds:X509SerialNumber>
+                                                </xades:IssuerSerial>
+                                            </xades:Cert>
+                                        </xades:SigningCertificate>
+                                    </xades:SignedSignatureProperties>
+                                </xades:SignedProperties>
       </xades:QualifyingProperties>
     </ds:Object>
 
