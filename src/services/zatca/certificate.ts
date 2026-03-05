@@ -17,27 +17,19 @@ import * as Crypto from 'expo-crypto';
  * SHA-256 digest of the raw certificate bytes, returned as base-64.
  */
 export async function getCertificateDigestValue(certBase64: string): Promise<string> {
-  // decode certificate
-  const certBytes = base64ToBytes(certBase64);
+  // Decode certificate to DER
+  const certBytes = decodeCertificate(certBase64);
 
-  // SHA256
+  // SHA256 hash of DER
   const hashBuffer = await Crypto.digest(
     Crypto.CryptoDigestAlgorithm.SHA256,
-    certBytes as unknown as BufferSource,
+    certBytes.buffer as ArrayBuffer,
   );
 
   const hashBytes = new Uint8Array(hashBuffer);
 
-  // convert to HEX string
-  const hex = Array.from(hashBytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-
-  // convert HEX string → UTF8 bytes
-  const utf8Bytes = new TextEncoder().encode(hex);
-
-  // base64 encode
-  return bytesToBase64(utf8Bytes);
+  // Return Base64 of raw hash (NOT hex)
+  return bytesToBase64(hashBytes);
 }
 /**
  * Extract the issuer distinguished-name as a human-readable string.
@@ -104,50 +96,9 @@ export function decodeCertificate(certBase64: string): Uint8Array {
 //   const der = base64ToBytes(certBase64);
 //   return parseSignatureValue(der);
 // }
-export function getCertificateSignatureBytes(certBase64?: string): Uint8Array {
-  try {
-    if (!certBase64) {
-      throw new Error('ZATCA certificate is missing or undefined');
-    }
-
-    const der = decodeCertificate(certBase64);
-
-    if (!der || der.length === 0) {
-      throw new Error('Certificate decoding failed (DER empty)');
-    }
-
-    console.log('Certificate DER length:', der.length);
-
-    // Scan backwards for BIT STRING (0x03)
-    for (let i = der.length - 1; i >= 0; i--) {
-      if (der[i] === 0x03) {
-        const length = der[i + 1];
-
-        // basic sanity check
-        if (!length || length < 60 || length > 80) continue;
-
-        const start = i + 3;
-        const end = start + length - 1;
-
-        if (end > der.length) continue;
-
-        const signature = der.slice(start, end);
-
-        console.log('Certificate signature found. Length:', signature.length);
-
-        return signature;
-      }
-    }
-
-    console.error('Certificate parsing failed. DER preview:', Array.from(der.slice(0, 40)));
-
-    throw new Error(
-      'Certificate signature not found. The certificate may not be valid X509 DER or may have an unexpected structure.',
-    );
-  } catch (err) {
-    console.error('ZATCA certificate signature extraction error:', err);
-    throw err;
-  }
+export function getCertificateSignatureBytes(certBase64: string): Uint8Array {
+  const der = decodeCertificate(certBase64);
+  return parseSignatureValue(der);
 }
 /* ====================================================================
  * Minimal ASN.1 / DER parser
