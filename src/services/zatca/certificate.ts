@@ -11,17 +11,23 @@ import * as Crypto from 'expo-crypto';
 import { EC_CURVE } from './constants';
 
 export async function getCertificateDigestValue(certBase64: string): Promise<string> {
-  // ZATCA: hash the cleaned base64 certificate body string (not DER bytes)
-  // Then SHA-256 → hex → base64(hex)
-  const cleanCertBody = getCleanCertBody(certBase64);
+  // C# flow: SHA256(cert.RawData) → hex → base64(UTF8(hex))
+  // cert.RawData = raw DER bytes of the certificate
+  const derBytes = decodeCertificate(certBase64);
 
-  const hexHash = await Crypto.digestStringAsync(
+  // SHA-256 hash of the raw DER bytes
+  const hashBuf = await Crypto.digest(
     Crypto.CryptoDigestAlgorithm.SHA256,
-    cleanCertBody,
-    { encoding: Crypto.CryptoEncoding.HEX },
+    derBytes.buffer as ArrayBuffer,
   );
+  const hashBytes = new Uint8Array(hashBuf);
 
-  // base64-encode the hex string
+  // Convert hash to lowercase hex string
+  const hexHash = Array.from(hashBytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+
+  // base64-encode the hex string (as UTF-8 bytes)
   return bytesToBase64(new TextEncoder().encode(hexHash));
 }
 
@@ -177,17 +183,10 @@ function parseTBSCertificate(der: Uint8Array): TBSInfo {
   tbsPos = subject.contentStart + subject.contentLength;
 
   // subjectPublicKeyInfo SEQUENCE
+  // For QR Tag 8, ZATCA expects the FULL SubjectPublicKeyInfo DER bytes
+  // (including algorithm identifier), not just the raw key bytes.
   const spki = readTag(der, tbsPos);
-  // We want the raw BIT STRING value inside (the actual key bytes)
-  let spkiPos = spki.contentStart;
-  const pkAlg = readTag(der, spkiPos);
-  spkiPos = pkAlg.contentStart + pkAlg.contentLength;
-  const pkBits = readTag(der, spkiPos);
-  // BIT STRING has a leading "unused bits" byte; skip it
-  const publicKeyBytes = der.slice(
-    pkBits.contentStart + 1,
-    pkBits.contentStart + pkBits.contentLength,
-  );
+  const publicKeyBytes = der.slice(tbsPos, spki.contentStart + spki.contentLength);
 
   return { serialNumber, issuer, publicKeyBytes };
 }

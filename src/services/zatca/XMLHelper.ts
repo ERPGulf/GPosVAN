@@ -3,7 +3,7 @@
 /*  Replaces xmlbuilder2 with deterministic string builder            */
 /* ------------------------------------------------------------------ */
 
-import { NS } from './constants';
+import { INVOICE_SUBTYPE, NS } from './constants';
 import { calculateItemAmounts, calculateTotals } from './totals';
 import type { Invoice } from './types';
 
@@ -29,28 +29,20 @@ export function buildInvoiceXML(invoice: Invoice): string {
   const f = (n: number) => n.toFixed(2);
   const cur = invoice.currency;
 
-  let xml = `<?xml version="1.0" encoding="UTF-8"?>`;
-  xml += `<Invoice
-    xmlns="${NS.ubl}"
-    xmlns:cac="${NS.cac}"
-    xmlns:cbc="${NS.cbc}"
-    xmlns:ext="${NS.ext}"
-    xmlns:sig="${NS.sig}"
-    xmlns:sac="${NS.sac}"
-    xmlns:sbc="${NS.sbc}"
-    xmlns:ds="${NS.ds}"
-    xmlns:xades="${NS.xades}"
-  >`;
+  let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+  xml += `<Invoice xmlns="${NS.ubl}" xmlns:cac="${NS.cac}" xmlns:cbc="${NS.cbc}" xmlns:ext="${NS.ext}">`;
+
+  const invoiceSubtype = invoice.invoiceSubtype ?? INVOICE_SUBTYPE;
 
   /* ── Base tags ── */
-  xml += `<cbc:ProfileID>reporting:1.0</cbc:ProfileID>`;
-  xml += `<cbc:ID>ACC-SINV-${new Date().getFullYear()}-${esc(invoice.invoiceNumber)}</cbc:ID>`;
-  xml += `<cbc:UUID>${esc(invoice.uuid)}</cbc:UUID>`;
-  xml += `<cbc:IssueDate>${esc(invoice.issueDate)}</cbc:IssueDate>`;
-  xml += `<cbc:IssueTime>${esc(invoice.issueTime)}</cbc:IssueTime>`;
-  xml += `<cbc:InvoiceTypeCode name="0200000">388</cbc:InvoiceTypeCode>`;
-  xml += `<cbc:DocumentCurrencyCode>${cur}</cbc:DocumentCurrencyCode>`;
-  xml += `<cbc:TaxCurrencyCode>${cur}</cbc:TaxCurrencyCode>`;
+  xml += `\n  <cbc:ProfileID>reporting:1.0</cbc:ProfileID>`;
+  xml += `\n  <cbc:ID>ACC-SINV-${new Date().getFullYear()}-${esc(invoice.invoiceNumber)}</cbc:ID>`;
+  xml += `\n  <cbc:UUID>${esc(invoice.uuid)}</cbc:UUID>`;
+  xml += `\n  <cbc:IssueDate>${esc(invoice.issueDate)}</cbc:IssueDate>`;
+  xml += `\n  <cbc:IssueTime>${esc(invoice.issueTime)}</cbc:IssueTime>`;
+  xml += `\n  <cbc:InvoiceTypeCode name="${invoiceSubtype}">388</cbc:InvoiceTypeCode>`;
+  xml += `\n  <cbc:DocumentCurrencyCode>${cur}</cbc:DocumentCurrencyCode>`;
+  xml += `\n  <cbc:TaxCurrencyCode>${cur}</cbc:TaxCurrencyCode>`;
 
   /* ── ICV ── */
   const icvNum = invoice.invoiceNumber.replace(/[^0-9]/g, '');
@@ -61,26 +53,20 @@ export function buildInvoiceXML(invoice: Invoice): string {
   </cac:AdditionalDocumentReference>`;
 
   /* ── PIH ── */
-  xml += `
-  <cac:AdditionalDocumentReference>
-    <cbc:ID>PIH</cbc:ID>
-    <cac:Attachment>
-      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">
-        ${esc(invoice.previousInvoiceHash)}
-      </cbc:EmbeddedDocumentBinaryObject>
-    </cac:Attachment>
-  </cac:AdditionalDocumentReference>`;
+  xml += `\n  <cac:AdditionalDocumentReference>`;
+  xml += `\n    <cbc:ID>PIH</cbc:ID>`;
+  xml += `\n    <cac:Attachment>`;
+  xml += `\n      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">${esc(invoice.previousInvoiceHash)}</cbc:EmbeddedDocumentBinaryObject>`;
+  xml += `\n    </cac:Attachment>`;
+  xml += `\n  </cac:AdditionalDocumentReference>`;
 
   /* ── QR Placeholder ── */
-  xml += `
-  <cac:AdditionalDocumentReference>
-    <cbc:ID>QR</cbc:ID>
-    <cac:Attachment>
-      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">
-        PLACEHOLDER_QR
-      </cbc:EmbeddedDocumentBinaryObject>
-    </cac:Attachment>
-  </cac:AdditionalDocumentReference>`;
+  xml += `\n  <cac:AdditionalDocumentReference>`;
+  xml += `\n    <cbc:ID>QR</cbc:ID>`;
+  xml += `\n    <cac:Attachment>`;
+  xml += `\n      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">PLACEHOLDER_QR</cbc:EmbeddedDocumentBinaryObject>`;
+  xml += `\n    </cac:Attachment>`;
+  xml += `\n  </cac:AdditionalDocumentReference>`;
 
   /* ── Signature element ── */
   xml += `
@@ -110,12 +96,12 @@ export function buildInvoiceXML(invoice: Invoice): string {
   /* ── AllowanceCharge ── */
   xml += buildAllowanceCharge(invoice);
 
-  /* ── TaxTotal ── */
-  xml += `
-  <cac:TaxTotal>
-    <cbc:TaxAmount currencyID="${cur}">${f(totals.totalTax)}</cbc:TaxAmount>
-  </cac:TaxTotal>`;
+  /* ── TaxTotal (1st: just TaxAmount) ── */
+  xml += `\n  <cac:TaxTotal>`;
+  xml += `\n    <cbc:TaxAmount currencyID="${cur}">${f(totals.totalTax)}</cbc:TaxAmount>`;
+  xml += `\n  </cac:TaxTotal>`;
 
+  /* ── TaxTotal (2nd: TaxAmount + TaxSubtotal) ── */
   xml += buildTaxTotalWithSubtotal(totals.totalTax, totals.taxableAmount, cur);
 
   /* ── LegalMonetaryTotal ── */
@@ -124,7 +110,7 @@ export function buildInvoiceXML(invoice: Invoice): string {
   /* ── InvoiceLines ── */
   xml += buildInvoiceLines(invoice);
 
-  xml += `</Invoice>`;
+  xml += `\n</Invoice>`;
 
   return xml;
 }
@@ -190,13 +176,13 @@ export function buildCustomerParty(invoice: Invoice): string {
 }
 
 export function buildAllowanceCharge(invoice: Invoice): string {
-  if (invoice.discount <= 0) return '';
+  const discountAmount = (invoice.discount ?? 0).toFixed(2);
   return `
   <cac:AllowanceCharge>
     <cbc:ChargeIndicator>false</cbc:ChargeIndicator>
     <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>
     <cbc:AllowanceChargeReason>Discount</cbc:AllowanceChargeReason>
-    <cbc:Amount currencyID="${invoice.currency}">${invoice.discount.toFixed(2)}</cbc:Amount>
+    <cbc:Amount currencyID="${invoice.currency}">${discountAmount}</cbc:Amount>
     <cac:TaxCategory>
       <cbc:ID>S</cbc:ID>
       <cbc:Percent>15.00</cbc:Percent>
@@ -299,34 +285,37 @@ export function injectUBLExtensions(
   issuerName: string,
   serialNumber: string,
 ): string {
-  const extBlock = `
-  <ext:UBLExtensions>
-    <ext:UBLExtension>
-      <ext:ExtensionURI>urn:oasis:names:specification:ubl:dsig:enveloped:xades</ext:ExtensionURI>
-      <ext:ExtensionContent>
-        <sig:UBLDocumentSignatures>
-          <sac:SignatureInformation>
-            <cbc:ID>urn:oasis:names:specification:ubl:signature:1</cbc:ID>
-            <sbc:ReferencedSignatureID>urn:oasis:names:specification:ubl:signature:Invoice</sbc:ReferencedSignatureID>
-            ${buildDSSignature(
-              invoiceHashBase64,
-              signedPropsHash,
-              signatureValueBase64,
-              certificateBody,
-              signingTime,
-              certificateDigest,
-              issuerName,
-              serialNumber,
-            )}
-          </sac:SignatureInformation>
-        </sig:UBLDocumentSignatures>
-      </ext:ExtensionContent>
-    </ext:UBLExtension>
-  </ext:UBLExtensions>
-  `;
+  const dsSignature = buildDSSignature(
+    invoiceHashBase64,
+    signedPropsHash,
+    signatureValueBase64,
+    certificateBody,
+    signingTime,
+    certificateDigest,
+    issuerName,
+    serialNumber,
+  );
 
-  return xml.replace(/<Invoice[\s\S]*?>/, (match) => match + extBlock);
+  // Build the UBL extensions block matching the cleared XML indentation exactly
+  let ext = '';
+  ext += `\n<ext:UBLExtensions>`;
+  ext += `\n    <ext:UBLExtension>`;
+  ext += `\n        <ext:ExtensionURI>urn:oasis:names:specification:ubl:dsig:enveloped:xades</ext:ExtensionURI>`;
+  ext += `\n        <ext:ExtensionContent>`;
+  ext += `\n            <sig:UBLDocumentSignatures xmlns:sig="${NS.sig}" xmlns:sac="${NS.sac}" xmlns:sbc="${NS.sbc}">`;
+  ext += `\n                <sac:SignatureInformation>`;
+  ext += `\n                    <cbc:ID>urn:oasis:names:specification:ubl:signature:1</cbc:ID>`;
+  ext += `\n                    <sbc:ReferencedSignatureID>urn:oasis:names:specification:ubl:signature:Invoice</sbc:ReferencedSignatureID>`;
+  ext += `\n                    ${dsSignature}`;
+  ext += `\n                </sac:SignatureInformation>`;
+  ext += `\n            </sig:UBLDocumentSignatures>`;
+  ext += `\n        </ext:ExtensionContent>`;
+  ext += `\n    </ext:UBLExtension>`;
+  ext += `\n</ext:UBLExtensions>`;
+
+  return xml.replace(/<Invoice[\s\S]*?>/, (match) => match + ext);
 }
+
 export function buildDSSignature(
   invoiceHash: string,
   signedPropsHash: string,
@@ -337,70 +326,59 @@ export function buildDSSignature(
   issuerName: string,
   serialNumber: string,
 ): string {
-  return `
-  <ds:Signature Id="signature">
-
-    <ds:SignedInfo>
-      <ds:CanonicalizationMethod Algorithm="http://www.w3.org/2006/12/xml-c14n11"/>
-      <ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"/>
-
-      <ds:Reference Id="invoiceSignedData" URI="">
-        <ds:Transforms>
-          <ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116">
-            <ds:XPath>not(//ancestor-or-self::ext:UBLExtensions)</ds:XPath>
-          </ds:Transform>
-          <ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116">
-            <ds:XPath>not(//ancestor-or-self::cac:Signature)</ds:XPath>
-          </ds:Transform>
-          <ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116">
-            <ds:XPath>
-              not(//ancestor-or-self::cac:AdditionalDocumentReference[cbc:ID='QR'])
-            </ds:XPath>
-          </ds:Transform>
-          <ds:Transform Algorithm="http://www.w3.org/2006/12/xml-c14n11"/>
-        </ds:Transforms>
-        <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
-        <ds:DigestValue>${invoiceHash}</ds:DigestValue>
-      </ds:Reference>
-
-      <ds:Reference URI="#xadesSignedProperties"
-        Type="http://www.w3.org/2000/09/xmldsig#SignatureProperties">
-        <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
-        <ds:DigestValue>${signedPropsHash}</ds:DigestValue>
-      </ds:Reference>
-
-    </ds:SignedInfo>
-
-    <ds:SignatureValue>${signatureValue}</ds:SignatureValue>
-
-    <ds:KeyInfo>
-      <ds:X509Data>
-        <ds:X509Certificate>${certificateBody}</ds:X509Certificate>
-      </ds:X509Data>
-    </ds:KeyInfo>
-
-    <ds:Object>
-      <xades:QualifyingProperties xmlns:xades="http://uri.etsi.org/01903/v1.3.2#" Target="signature">
-                                <xades:SignedProperties Id="xadesSignedProperties">
-                                    <xades:SignedSignatureProperties>
-                                        <xades:SigningTime>${signingTime}</xades:SigningTime>
-                                        <xades:SigningCertificate>
-                                            <xades:Cert>
-                                                <xades:CertDigest>
-                                                    <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>
-                                                    <ds:DigestValue>${certificateDigest}</ds:DigestValue>
-                                                </xades:CertDigest>
-                                                <xades:IssuerSerial>
-                                                    <ds:X509IssuerName>${issuerName}</ds:X509IssuerName>
-                                                    <ds:X509SerialNumber>${serialNumber}</ds:X509SerialNumber>
-                                                </xades:IssuerSerial>
-                                            </xades:Cert>
-                                        </xades:SigningCertificate>
-                                    </xades:SignedSignatureProperties>
-                                </xades:SignedProperties>
-      </xades:QualifyingProperties>
-    </ds:Object>
-
-  </ds:Signature>
-  `;
+  let sig = '';
+  sig += `<ds:Signature xmlns:ds="${NS.ds}" Id="signature">`;
+  sig += `\n                        <ds:SignedInfo>`;
+  sig += `\n                            <ds:CanonicalizationMethod Algorithm="http://www.w3.org/2006/12/xml-c14n11"/>`;
+  sig += `\n                            <ds:SignatureMethod Algorithm="http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"/>`;
+  sig += `\n                            <ds:Reference Id="invoiceSignedData" URI="">`;
+  sig += `\n                                <ds:Transforms>`;
+  sig += `\n                                    <ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116">`;
+  sig += `\n                                        <ds:XPath>not(//ancestor-or-self::ext:UBLExtensions)</ds:XPath>`;
+  sig += `\n                                    </ds:Transform>`;
+  sig += `\n                                    <ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116">`;
+  sig += `\n                                        <ds:XPath>not(//ancestor-or-self::cac:Signature)</ds:XPath>`;
+  sig += `\n                                    </ds:Transform>`;
+  sig += `\n                                    <ds:Transform Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116">`;
+  sig += `\n                                        <ds:XPath>not(//ancestor-or-self::cac:AdditionalDocumentReference[cbc:ID='QR'])</ds:XPath>`;
+  sig += `\n                                    </ds:Transform>`;
+  sig += `\n                                    <ds:Transform Algorithm="http://www.w3.org/2006/12/xml-c14n11"/>`;
+  sig += `\n                                </ds:Transforms>`;
+  sig += `\n                                <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>`;
+  sig += `\n                                <ds:DigestValue>${invoiceHash}</ds:DigestValue>`;
+  sig += `\n                            </ds:Reference>`;
+  sig += `\n                            <ds:Reference Type="http://www.w3.org/2000/09/xmldsig#SignatureProperties" URI="#xadesSignedProperties">`;
+  sig += `\n                                <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>`;
+  sig += `\n                                <ds:DigestValue>${signedPropsHash}</ds:DigestValue>`;
+  sig += `\n                            </ds:Reference>`;
+  sig += `\n                        </ds:SignedInfo>`;
+  sig += `\n                        <ds:SignatureValue>${signatureValue}</ds:SignatureValue>`;
+  sig += `\n                        <ds:KeyInfo>`;
+  sig += `\n                            <ds:X509Data>`;
+  sig += `\n                                <ds:X509Certificate>${certificateBody}</ds:X509Certificate>`;
+  sig += `\n                            </ds:X509Data>`;
+  sig += `\n                        </ds:KeyInfo>`;
+  sig += `\n                        <ds:Object>`;
+  sig += `\n                            <xades:QualifyingProperties xmlns:xades="${NS.xades}" Target="signature">`;
+  sig += `\n                                <xades:SignedProperties Id="xadesSignedProperties">`;
+  sig += `\n                                    <xades:SignedSignatureProperties>`;
+  sig += `\n                                        <xades:SigningTime>${signingTime}</xades:SigningTime>`;
+  sig += `\n                                        <xades:SigningCertificate>`;
+  sig += `\n                                            <xades:Cert>`;
+  sig += `\n                                                <xades:CertDigest>`;
+  sig += `\n                                                    <ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/>`;
+  sig += `\n                                                    <ds:DigestValue>${certificateDigest}</ds:DigestValue>`;
+  sig += `\n                                                </xades:CertDigest>`;
+  sig += `\n                                                <xades:IssuerSerial>`;
+  sig += `\n                                                    <ds:X509IssuerName>${issuerName}</ds:X509IssuerName>`;
+  sig += `\n                                                    <ds:X509SerialNumber>${serialNumber}</ds:X509SerialNumber>`;
+  sig += `\n                                                </xades:IssuerSerial>`;
+  sig += `\n                                            </xades:Cert>`;
+  sig += `\n                                        </xades:SigningCertificate>`;
+  sig += `\n                                    </xades:SignedSignatureProperties>`;
+  sig += `\n                                </xades:SignedProperties>`;
+  sig += `\n                            </xades:QualifyingProperties>`;
+  sig += `\n                        </ds:Object>`;
+  sig += `\n                    </ds:Signature>`;
+  return sig;
 }

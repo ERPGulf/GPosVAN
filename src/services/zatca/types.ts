@@ -73,6 +73,9 @@ export interface Invoice {
 
   /** Whether item prices already include tax */
   isTaxIncludedInPrice: boolean;
+
+  /** Invoice subtype code: '0100000' = Standard, '0200000' = Simplified. Defaults to INVOICE_SUBTYPE constant. */
+  invoiceSubtype?: string;
 }
 
 // ───────── Computed totals ─────────

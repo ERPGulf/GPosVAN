@@ -5,7 +5,7 @@
 /*  and adds a BillingReference to the original invoice.              */
 /* ------------------------------------------------------------------ */
 
-import { NS } from './constants';
+import { INVOICE_SUBTYPE, NS } from './constants';
 import { calculateTotals } from './totals';
 import type { SalesReturnInvoice } from './types';
 import {
@@ -28,28 +28,20 @@ export function buildSalesReturnXML(invoice: SalesReturnInvoice): string {
   const f = (n: number) => n.toFixed(2);
   const cur = invoice.currency;
 
-  let xml = `<?xml version="1.0" encoding="UTF-8"?>`;
-  xml += `<Invoice
-    xmlns="${NS.ubl}"
-    xmlns:cac="${NS.cac}"
-    xmlns:cbc="${NS.cbc}"
-    xmlns:ext="${NS.ext}"
-    xmlns:sig="${NS.sig}"
-    xmlns:sac="${NS.sac}"
-    xmlns:sbc="${NS.sbc}"
-    xmlns:ds="${NS.ds}"
-    xmlns:xades="${NS.xades}"
-  >`;
+  let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
+  xml += `<Invoice xmlns="${NS.ubl}" xmlns:cac="${NS.cac}" xmlns:cbc="${NS.cbc}" xmlns:ext="${NS.ext}">`;
+
+  const invoiceSubtype = invoice.invoiceSubtype ?? INVOICE_SUBTYPE;
 
   /* ── Base tags (type 381 = credit note) ── */
-  xml += `<cbc:ProfileID>reporting:1.0</cbc:ProfileID>`;
-  xml += `<cbc:ID>ACC-SINV-${new Date().getFullYear()}-${esc(invoice.invoiceNumber)}</cbc:ID>`;
-  xml += `<cbc:UUID>${esc(invoice.uuid)}</cbc:UUID>`;
-  xml += `<cbc:IssueDate>${esc(invoice.issueDate)}</cbc:IssueDate>`;
-  xml += `<cbc:IssueTime>${esc(invoice.issueTime)}</cbc:IssueTime>`;
-  xml += `<cbc:InvoiceTypeCode name="0200000">381</cbc:InvoiceTypeCode>`;
-  xml += `<cbc:DocumentCurrencyCode>${cur}</cbc:DocumentCurrencyCode>`;
-  xml += `<cbc:TaxCurrencyCode>${cur}</cbc:TaxCurrencyCode>`;
+  xml += `\n  <cbc:ProfileID>reporting:1.0</cbc:ProfileID>`;
+  xml += `\n  <cbc:ID>ACC-SINV-${new Date().getFullYear()}-${esc(invoice.invoiceNumber)}</cbc:ID>`;
+  xml += `\n  <cbc:UUID>${esc(invoice.uuid)}</cbc:UUID>`;
+  xml += `\n  <cbc:IssueDate>${esc(invoice.issueDate)}</cbc:IssueDate>`;
+  xml += `\n  <cbc:IssueTime>${esc(invoice.issueTime)}</cbc:IssueTime>`;
+  xml += `\n  <cbc:InvoiceTypeCode name="${invoiceSubtype}">381</cbc:InvoiceTypeCode>`;
+  xml += `\n  <cbc:DocumentCurrencyCode>${cur}</cbc:DocumentCurrencyCode>`;
+  xml += `\n  <cbc:TaxCurrencyCode>${cur}</cbc:TaxCurrencyCode>`;
 
   /* ── ICV ── */
   const icvNum = invoice.invoiceNumber.replace(/[^0-9]/g, '');
@@ -60,26 +52,20 @@ export function buildSalesReturnXML(invoice: SalesReturnInvoice): string {
   </cac:AdditionalDocumentReference>`;
 
   /* ── PIH ── */
-  xml += `
-  <cac:AdditionalDocumentReference>
-    <cbc:ID>PIH</cbc:ID>
-    <cac:Attachment>
-      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">
-        ${esc(invoice.previousInvoiceHash)}
-      </cbc:EmbeddedDocumentBinaryObject>
-    </cac:Attachment>
-  </cac:AdditionalDocumentReference>`;
+  xml += `\n  <cac:AdditionalDocumentReference>`;
+  xml += `\n    <cbc:ID>PIH</cbc:ID>`;
+  xml += `\n    <cac:Attachment>`;
+  xml += `\n      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">${esc(invoice.previousInvoiceHash)}</cbc:EmbeddedDocumentBinaryObject>`;
+  xml += `\n    </cac:Attachment>`;
+  xml += `\n  </cac:AdditionalDocumentReference>`;
 
   /* ── QR Placeholder ── */
-  xml += `
-  <cac:AdditionalDocumentReference>
-    <cbc:ID>QR</cbc:ID>
-    <cac:Attachment>
-      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">
-        PLACEHOLDER_QR
-      </cbc:EmbeddedDocumentBinaryObject>
-    </cac:Attachment>
-  </cac:AdditionalDocumentReference>`;
+  xml += `\n  <cac:AdditionalDocumentReference>`;
+  xml += `\n    <cbc:ID>QR</cbc:ID>`;
+  xml += `\n    <cac:Attachment>`;
+  xml += `\n      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">PLACEHOLDER_QR</cbc:EmbeddedDocumentBinaryObject>`;
+  xml += `\n    </cac:Attachment>`;
+  xml += `\n  </cac:AdditionalDocumentReference>`;
 
   /* ── Billing Reference (original invoice being returned) ── */
   xml += `
@@ -158,31 +144,32 @@ export function injectSalesReturnUBLExtensions(
   issuerName: string,
   serialNumber: string,
 ): string {
-  const extBlock = `
-  <ext:UBLExtensions>
-    <ext:UBLExtension>
-      <ext:ExtensionURI>urn:oasis:names:specification:ubl:dsig:enveloped:xades</ext:ExtensionURI>
-      <ext:ExtensionContent>
-        <sig:UBLDocumentSignatures>
-          <sac:SignatureInformation>
-            <cbc:ID>urn:oasis:names:specification:ubl:signature:1</cbc:ID>
-            <sbc:ReferencedSignatureID>urn:oasis:names:specification:ubl:signature:Invoice</sbc:ReferencedSignatureID>
-            ${buildDSSignature(
-              invoiceHashBase64,
-              signedPropsHash,
-              signatureValueBase64,
-              certificateBody,
-              signingTime,
-              certificateDigest,
-              issuerName,
-              serialNumber,
-            )}
-          </sac:SignatureInformation>
-        </sig:UBLDocumentSignatures>
-      </ext:ExtensionContent>
-    </ext:UBLExtension>
-  </ext:UBLExtensions>
-  `;
+  const dsSignature = buildDSSignature(
+    invoiceHashBase64,
+    signedPropsHash,
+    signatureValueBase64,
+    certificateBody,
+    signingTime,
+    certificateDigest,
+    issuerName,
+    serialNumber,
+  );
 
-  return xml.replace(/<Invoice[\s\S]*?>/, (match) => match + extBlock);
+  let ext = '';
+  ext += `\n<ext:UBLExtensions>`;
+  ext += `\n    <ext:UBLExtension>`;
+  ext += `\n        <ext:ExtensionURI>urn:oasis:names:specification:ubl:dsig:enveloped:xades</ext:ExtensionURI>`;
+  ext += `\n        <ext:ExtensionContent>`;
+  ext += `\n            <sig:UBLDocumentSignatures xmlns:sig="${NS.sig}" xmlns:sac="${NS.sac}" xmlns:sbc="${NS.sbc}">`;
+  ext += `\n                <sac:SignatureInformation>`;
+  ext += `\n                    <cbc:ID>urn:oasis:names:specification:ubl:signature:1</cbc:ID>`;
+  ext += `\n                    <sbc:ReferencedSignatureID>urn:oasis:names:specification:ubl:signature:Invoice</sbc:ReferencedSignatureID>`;
+  ext += `\n                    ${dsSignature}`;
+  ext += `\n                </sac:SignatureInformation>`;
+  ext += `\n            </sig:UBLDocumentSignatures>`;
+  ext += `\n        </ext:ExtensionContent>`;
+  ext += `\n    </ext:UBLExtension>`;
+  ext += `\n</ext:UBLExtensions>`;
+
+  return xml.replace(/<Invoice[\s\S]*?>/, (match) => match + ext);
 }

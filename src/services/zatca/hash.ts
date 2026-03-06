@@ -1,76 +1,177 @@
+/* ------------------------------------------------------------------ */
+/*  ZATCA E-Invoicing – hashing utilities                             */
+/*                                                                    */
+/*  Provides invoice hash and signed-properties hash generation.      */
+/*  Uses a minimal C14N 1.1 implementation (xmldom for DOM parsing,   */
+/*  custom serialization) to avoid xmldom's XMLSerializer which does   */
+/*  NOT produce proper canonical XML.                                 */
+/* ------------------------------------------------------------------ */
+
 import * as Crypto from 'expo-crypto';
-import { DOMParser, XMLSerializer } from 'xmldom';
-import * as xpath from 'xpath';
+import { DOMParser } from 'xmldom';
+
 import { bytesToBase64 } from './certificate';
 
+/* ====================================================================
+ * 1. Remove signature-related nodes (string-based, preserves bytes)
+ * ==================================================================== */
+
 function removeSignatureNodes(xml: string): string {
-  const doc = new DOMParser().parseFromString(xml);
+  let result = xml;
 
-  const select = xpath.useNamespaces({
-    ext: 'urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2',
-    cac: 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2',
-    cbc: 'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2',
-  });
+  // Remove <ext:UBLExtensions>...</ext:UBLExtensions>
+  // Note: Do NOT consume leading whitespace — ZATCA XPath transforms remove
+  // only the element nodes, leaving surrounding whitespace intact.
+  result = result.replace(/<ext:UBLExtensions[\s\S]*?<\/ext:UBLExtensions>/g, '');
 
-  // Remove UBLExtensions
-  const extNodes = select('//ext:UBLExtensions', doc) as Node[];
-  extNodes.forEach((n) => n.parentNode?.removeChild(n));
+  // Remove <cac:Signature>...</cac:Signature>
+  result = result.replace(/<cac:Signature>[\s\S]*?<\/cac:Signature>/g, '');
 
-  // Remove Signature
-  const sigNodes = select('//cac:Signature', doc) as Node[];
-  sigNodes.forEach((n) => n.parentNode?.removeChild(n));
-
-  // Remove QR reference
-  const qrNodes = select("//cac:AdditionalDocumentReference[cbc:ID='QR']", doc) as Node[];
-  qrNodes.forEach((n) => n.parentNode?.removeChild(n));
-
-  return new XMLSerializer().serializeToString(doc);
-}
-
-/**
- * Canonicalize XML for ZATCA hashing.
- * Matches C# CanonicalizeXml flow:
- *   1. Save XML with whitespace tweaks
- *   2. Apply C14N transform (we approximate with xmldom re-serialize which strips XML declaration)
- *
- * The C# code applies these replacements before C14N:
- *   xmlText.Replace("<cbc:ProfileID>", "\n  <cbc:ProfileID>");
- *   xmlText.Replace("<cac:AccountingSupplierParty>", "\n  \n  <cac:AccountingSupplierParty>");
- */
-function canonicalize(xml: string): string {
-  // Remove XML declaration (<?xml ...?>)  — C14N removes it
-  let result = xml.replace(/<\?xml[^?]*\?>\s*/g, '');
-
-  // Parse and re-serialize via xmldom for consistent output
-  const doc = new DOMParser().parseFromString(result);
-  result = new XMLSerializer().serializeToString(doc);
-
-  // C# whitespace workarounds (applied before C14N in the C# code)
-  result = result.replace('<cbc:ProfileID>', '\n  <cbc:ProfileID>');
-  result = result.replace('<cac:AccountingSupplierParty>', '\n  \n  <cac:AccountingSupplierParty>');
+  // Remove <cac:AdditionalDocumentReference> that contains <cbc:ID>QR</cbc:ID>
+  result = result.replace(
+    /<cac:AdditionalDocumentReference>\s*<cbc:ID>QR<\/cbc:ID>[\s\S]*?<\/cac:AdditionalDocumentReference>/g,
+    '',
+  );
 
   return result;
 }
+
+/* ====================================================================
+ * 2. Minimal C14N 1.1 serializer
+ *
+ * Uses xmldom for DOM parsing, then walks the tree and serializes
+ * following C14N 1.1 rules:
+ *   - No XML declaration
+ *   - Namespace declarations sorted alphabetically by prefix
+ *   - Regular attributes sorted by namespace URI then local name
+ *   - Empty elements output as start+end tag pair (no self-closing)
+ *   - Text content preserved as-is (with XML escaping)
+ *   - Comments excluded
+ * ==================================================================== */
+
+function canonicalize(xml: string): string {
+  // Remove XML declaration first
+  const cleaned = xml.replace(/<\?xml[^?]*\?>\s*/g, '');
+
+  const doc = new DOMParser().parseFromString(cleaned, 'text/xml');
+  if (!doc.documentElement) return cleaned;
+
+  return serializeNodeC14n(doc.documentElement, new Map<string, string>());
+}
+
+function serializeNodeC14n(node: Node, inheritedNs: Map<string, string>): string {
+  // Text node
+  if (node.nodeType === 3) {
+    return escapeC14nText(node.nodeValue || '');
+  }
+
+  // Skip comments, processing instructions, etc.
+  if (node.nodeType !== 1) return '';
+
+  const el = node as Element;
+  const tagName = el.tagName;
+
+  // Collect namespace declarations and regular attributes
+  const nsDecls: Array<[string, string]> = [];
+  const attrs: Array<[string, string]> = [];
+
+  for (let i = 0; i < el.attributes.length; i++) {
+    const attr = el.attributes[i];
+    if (attr.name === 'xmlns' || attr.name.startsWith('xmlns:')) {
+      nsDecls.push([attr.name, attr.value]);
+    } else {
+      attrs.push([attr.name, attr.value]);
+    }
+  }
+
+  // Determine which namespace declarations are new/changed vs inherited
+  const currentNs = new Map(inheritedNs);
+  const outputNs: Array<[string, string]> = [];
+
+  for (const [name, value] of nsDecls) {
+    const prefix = name === 'xmlns' ? '' : name.substring(6);
+    if (inheritedNs.get(prefix) !== value) {
+      outputNs.push([name, value]);
+    }
+    currentNs.set(prefix, value);
+  }
+
+  // Sort namespace declarations: default ns first, then alphabetically by prefix
+  outputNs.sort((a, b) => {
+    if (a[0] === 'xmlns') return -1;
+    if (b[0] === 'xmlns') return 1;
+    return a[0].localeCompare(b[0]);
+  });
+
+  // Sort regular attributes alphabetically by qualified name
+  attrs.sort((a, b) => a[0].localeCompare(b[0]));
+
+  // Build opening tag
+  let result = '<' + tagName;
+
+  for (const [name, value] of outputNs) {
+    result += ' ' + name + '="' + escapeC14nAttr(value) + '"';
+  }
+  for (const [name, value] of attrs) {
+    result += ' ' + name + '="' + escapeC14nAttr(value) + '"';
+  }
+
+  result += '>';
+
+  // Serialize children
+  for (let i = 0; i < el.childNodes.length; i++) {
+    result += serializeNodeC14n(el.childNodes[i], currentNs);
+  }
+
+  // Closing tag (C14N never uses self-closing)
+  result += '</' + tagName + '>';
+
+  return result;
+}
+
+/** C14N text escaping: &, <, >, \r */
+function escapeC14nText(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\r/g, '&#xD;');
+}
+
+/** C14N attribute value escaping: &, <, ", \t, \n, \r */
+function escapeC14nAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/"/g, '&quot;')
+    .replace(/\t/g, '&#x9;')
+    .replace(/\n/g, '&#xA;')
+    .replace(/\r/g, '&#xD;');
+}
+
+/* ====================================================================
+ * 3. Invoice hash generation
+ * ==================================================================== */
 
 /**
  * Generate invoice hash matching C# GetInvoiceHash:
  *   SHA256(canonicalXml) → { hex, base64 }
  */
 export async function generateInvoiceHash(xml: string) {
-  // STEP 1 remove nodes
+  // STEP 1: remove signature/QR/extension nodes
   const stripped = removeSignatureNodes(xml);
 
-  // STEP 2 canonicalize
+  // STEP 2: canonicalize (C14N 1.1)
   const canonicalXml = canonicalize(stripped);
 
-  // STEP 3 hash — base64
+  // STEP 3: hash — base64
   const base64Hash = await Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,
     canonicalXml,
     { encoding: Crypto.CryptoEncoding.BASE64 },
   );
 
-  // STEP 4 hash — hex (needed for signing, matching C# Item1)
+  // STEP 4: hash — hex (needed for signing)
   const hexHash = await Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,
     canonicalXml,
@@ -84,8 +185,12 @@ export async function generateInvoiceHash(xml: string) {
   };
 }
 
+/* ====================================================================
+ * 4. Signed properties hash generation
+ * ==================================================================== */
+
 /**
- * Generate signed properties hash matching C# GenerateSignedPropertiesHash EXACTLY.
+ * Generate signed properties hash matching C# GenerateSignedPropertiesHash.
  *
  * C# flow:
  *   1. Build XML template with exact whitespace (36/40/44/48/52 leading spaces)
@@ -102,7 +207,6 @@ export async function generateSignedPropertiesHash(
   certificateDigest: string,
 ) {
   // Build template matching C# GenerateSignedPropertiesHash exactly
-  // Each line ends with \n, indentation uses exact space counts from C#
   let xml = '';
   xml +=
     '<xades:SignedProperties xmlns:xades="http://uri.etsi.org/01903/v1.3.2#" Id="xadesSignedProperties">\n';
