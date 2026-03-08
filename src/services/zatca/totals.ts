@@ -37,7 +37,7 @@ export function calculateItemAmounts(
  * Calculate all invoice-level totals.
  */
 export function calculateTotals(
-  items: InvoiceItem[],
+  items: readonly InvoiceItem[],
   isTaxIncludedInPrice: boolean,
   discount: number = 0,
 ): InvoiceTotals {

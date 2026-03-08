@@ -7,13 +7,14 @@ import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 
 import {
-  getCertificateDigestValue,
-  getCertificateIssuer,
-  getCertificateSignatureBytes,
-  getCleanCertBody,
-  getPublicKeyBytes,
-  getSerialNumber
+    getCertificateDigestValue,
+    getCertificateIssuer,
+    getCertificateSignatureBytes,
+    getCleanCertBody,
+    getPublicKeyBytes,
+    getSerialNumber,
 } from './certificate';
+import { ZatcaError } from './errors';
 import { generateInvoiceHash, generateSignedPropertiesHash } from './hash';
 import { buildQRPayload } from './qr';
 import { signHash } from './signer';
@@ -40,100 +41,113 @@ export async function createInvoicePipeline(
   certificateBase64: string,
   privateKeyBase64: string,
 ): Promise<InvoiceResult> {
-  /* ── 1. Build base XML ── */
-  const baseXml = buildInvoiceXML(invoice);
+  /* ── Validate inputs ── */
+  if (!invoice.items.length) {
+    throw new ZatcaError('validation', 'Invoice must contain at least one item.');
+  }
+  if (!certificateBase64) {
+    throw new ZatcaError('validation', 'Certificate base64 string is required.');
+  }
+  if (!privateKeyBase64) {
+    throw new ZatcaError('validation', 'Private key base64 string is required.');
+  }
 
-  /* ── 2. Hash the base XML ── */
-  // C#: var invoiceHash = GetInvoiceHash(canonicalXml);
-  //   invoiceHash.Item1 = hex, invoiceHash.Item2 = base64
-  const invoiceHash = await generateInvoiceHash(baseXml);
-  console.log('Invoice Hash (base64):', invoiceHash.base64);
-  console.log('Invoice Hash (hex):', invoiceHash.hex);
+  try {
+    /* ── 1. Build base XML ── */
+    const baseXml = buildInvoiceXML(invoice);
 
-  /* ── 3. Certificate info ── */
-  // C#: CertificateUtils.getDigestValue(), .GetCertificateIssuer(), .GetSerialNumber()
-  const certDigest = await getCertificateDigestValue(certificateBase64);
-  const issuerName = getCertificateIssuer(certificateBase64);
-  const serialNumber = getSerialNumber(certificateBase64);
-  const signingTime = `${invoice.issueDate}T${invoice.issueTime}`;
+    /* ── 2. Hash the base XML ── */
+    const invoiceHash = await generateInvoiceHash(baseXml);
+    if (__DEV__) {
+      console.log('Invoice Hash (base64):', invoiceHash.base64);
+      console.log('Invoice Hash (hex):', invoiceHash.hex);
+    }
 
-  console.log('Cert Digest:', certDigest);
-  console.log('Issuer Name:', issuerName);
-  console.log('Serial Number:', serialNumber);
+    /* ── 3. Certificate info ── */
+    const certDigest = await getCertificateDigestValue(certificateBase64);
+    const issuerName = getCertificateIssuer(certificateBase64);
+    const serialNumber = getSerialNumber(certificateBase64);
+    const signingTime = `${invoice.issueDate}T${invoice.issueTime}`;
 
-  /* ── 4. Signed properties hash ── */
-  // C#: GenerateSignedPropertiesHash(signingTime, issuer, serial, certDigest)
-  const signedPropsHash = await generateSignedPropertiesHash(
-    signingTime,
-    issuerName,
-    serialNumber,
-    certDigest,
-  );
-  console.log('Signed Props Hash:', signedPropsHash);
+    if (__DEV__) {
+      console.log('Cert Digest:', certDigest);
+      console.log('Issuer Name:', issuerName);
+      console.log('Serial Number:', serialNumber);
+    }
 
-  /* ── 5. Sign the hex hash ── */
-  // C#: var invoiceSignature = CertificateUtils.SignHashWithECDSABytes(invoiceHash.Item1);
-  // Item1 = hex hash
-  const { derBase64: signatureBase64, rawBytes: signatureRawBytes } = await signHash(
-    invoiceHash.hex,
-    privateKeyBase64,
-  );
-  console.log('Signature (base64):', signatureBase64);
+    /* ── 4. Signed properties hash ── */
+    const signedPropsHash = await generateSignedPropertiesHash(
+      signingTime,
+      issuerName,
+      serialNumber,
+      certDigest,
+    );
+    if (__DEV__) console.log('Signed Props Hash:', signedPropsHash);
 
-  /* ── 6. Get clean certificate body for X509Certificate element ── */
-  // C#: Encoding.UTF8.GetString(Convert.FromBase64String(Certificate))
-  const certificateBody = getCleanCertBody(certificateBase64);
+    /* ── 5. Sign the hex hash ── */
+    const { derBase64: signatureBase64 } = await signHash(invoiceHash.hex, privateKeyBase64);
+    if (__DEV__) console.log('Signature (base64):', signatureBase64);
 
-  /* ── 7. Inject UBL extensions ── */
-  // C#: CreateUBLExtension(..., invoiceHash.Item2, signInfoHash, Convert.ToBase64String(sig))
-  // SignatureValue = Convert.ToBase64String(invoiceSignature)
-  const xmlWithExtensions = injectUBLExtensions(
-    baseXml,
-    invoiceHash.base64,
-    signedPropsHash,
-    signatureBase64,
-    certificateBody,
-    signingTime,
-    certDigest,
-    issuerName,
-    serialNumber,
-  );
+    /* ── 6. Get clean certificate body for X509Certificate element ── */
+    const certificateBody = getCleanCertBody(certificateBase64);
 
-  /* ── 8. Build QR payload ── */
-  // C#: QRUtils.GetQRString(hashBase64, ..., invoiceSignature)
-  const totals = calculateTotals(invoice.items, invoice.isTaxIncludedInPrice, invoice.discount);
-  const publicKeyBytes = getPublicKeyBytes(certificateBase64);
-  const certSigBytes = getCertificateSignatureBytes(certificateBase64);
+    /* ── 7. Inject UBL extensions ── */
+    const xmlWithExtensions = injectUBLExtensions(
+      baseXml,
+      invoiceHash.base64,
+      signedPropsHash,
+      signatureBase64,
+      certificateBody,
+      signingTime,
+      certDigest,
+      issuerName,
+      serialNumber,
+    );
 
-  console.log('PublicKey length:', publicKeyBytes.length);
-  console.log('CertSignature length:', certSigBytes.length);
+    /* ── 8. Build QR payload ── */
+    const totals = calculateTotals(invoice.items, invoice.isTaxIncludedInPrice, invoice.discount);
+    const publicKeyBytes = getPublicKeyBytes(certificateBase64);
+    const certSigBytes = getCertificateSignatureBytes(certificateBase64);
 
-  const qrBase64 = buildQRPayload({
-    sellerName: invoice.supplier.registrationName,
-    vatNumber: invoice.supplier.vatNumber,
-    timestamp: signingTime,
-    total: totals.totalWithTax.toFixed(2),
-    vat: totals.totalTax.toFixed(2),
-    hash: invoiceHash.base64,
-    signatureBase64: signatureBase64,
-    publicKeyBytes,
-    certSignatureBytes: certSigBytes,
-  });
+    if (__DEV__) {
+      console.log('PublicKey length:', publicKeyBytes.length);
+      console.log('CertSignature length:', certSigBytes.length);
+    }
 
-  /* ── 9. Inject QR into XML ── */
-  const finalXml = injectQRData(xmlWithExtensions, qrBase64);
+    const qrBase64 = buildQRPayload({
+      sellerName: invoice.supplier.registrationName,
+      vatNumber: invoice.supplier.vatNumber,
+      timestamp: signingTime,
+      total: totals.totalWithTax.toFixed(2),
+      vat: totals.totalTax.toFixed(2),
+      hash: invoiceHash.base64,
+      signatureBase64: signatureBase64,
+      publicKeyBytes,
+      certSignatureBytes: certSigBytes,
+    });
 
-  /* ── 10. Compute final hash → save as PIH for next invoice ── */
-  const finalHash = await generateInvoiceHash(finalXml);
-  await savePreviousInvoiceHash(finalHash.base64);
+    /* ── 9. Inject QR into XML ── */
+    const finalXml = injectQRData(xmlWithExtensions, qrBase64);
 
-  return {
-    xml: finalXml,
-    hash: invoiceHash.base64,
-    signature: signatureBase64,
-    qrBase64,
-    savedUri: undefined,
-  };
+    /* ── 10. Compute final hash → save as PIH for next invoice ── */
+    const finalHash = await generateInvoiceHash(finalXml);
+    await savePreviousInvoiceHash(finalHash.base64);
+
+    return {
+      xml: finalXml,
+      hash: invoiceHash.base64,
+      signature: signatureBase64,
+      qrBase64,
+      savedUri: undefined,
+    };
+  } catch (error) {
+    if (error instanceof ZatcaError) throw error;
+    throw new ZatcaError(
+      'pipeline',
+      `Invoice pipeline failed: ${error instanceof Error ? error.message : String(error)}`,
+      error,
+    );
+  }
 }
 
 /**
@@ -157,7 +171,7 @@ export async function saveInvoiceXML(invoiceNumber: string, xmlContent: string) 
 
   file.write(xmlContent);
 
-  console.log('Saved invoice XML:', file.uri);
+  if (__DEV__) console.log('Saved invoice XML:', file.uri);
 
   return file.uri;
 }

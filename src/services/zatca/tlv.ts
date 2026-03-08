@@ -11,12 +11,6 @@ export function encodeTLV(tag: number, value: string): Uint8Array {
   return encodeTLVBytes(tag, valueBytes);
 }
 /**
- * Encode a TLV triplet for **raw byte values**.
- */
-export function encodeTLVRaw(tag: number, valueBytes: Uint8Array): Uint8Array {
-  return encodeTLVBytes(tag, valueBytes);
-}
-/**
  * Encode a TLV triplet for a **raw byte-array** value
  * (used for tags 8 and 9 — public key & certificate signature).
  */

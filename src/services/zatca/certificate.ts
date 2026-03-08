@@ -6,9 +6,7 @@
 /*  Uses expo-crypto for SHA-256 and lightweight ASN.1 DER parsing.   */
 /* ------------------------------------------------------------------ */
 
-import { ec as EC } from 'elliptic';
 import * as Crypto from 'expo-crypto';
-import { EC_CURVE } from './constants';
 
 export async function getCertificateDigestValue(certBase64: string): Promise<string> {
   // C# flow: SHA256(cert.RawData) → hex → base64(UTF8(hex))
@@ -16,10 +14,7 @@ export async function getCertificateDigestValue(certBase64: string): Promise<str
   const derBytes = decodeCertificate(certBase64);
 
   // SHA-256 hash of the raw DER bytes
-  const hashBuf = await Crypto.digest(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    derBytes.buffer as ArrayBuffer,
-  );
+  const hashBuf = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, derBytes as any);
   const hashBytes = new Uint8Array(hashBuf);
 
   // Convert hash to lowercase hex string
@@ -69,22 +64,6 @@ export function getPublicKeyBytes(certBase64: string): Uint8Array {
   const der = decodeCertificate(certBase64);
   const tbsCert = parseTBSCertificate(der);
   return tbsCert.publicKeyBytes;
-}
-export function getPublicKeyBytesFromPem(publicKeyBase64: string): Uint8Array {
-  // decode outer base64
-  const pem = new TextDecoder().decode(base64ToBytes(publicKeyBase64));
-
-  // remove headers
-  const cleaned = pem
-    .replace('-----BEGIN PUBLIC KEY-----', '')
-    .replace('-----END PUBLIC KEY-----', '')
-    .replace(/\n/g, '');
-
-  // decode DER
-  const der = base64ToBytes(cleaned);
-
-  // last 65 bytes are the EC point
-  return der.slice(-65);
 }
 
 export function decodeCertificate(certBase64: string): Uint8Array {
@@ -368,11 +347,6 @@ export function bytesToBase64(bytes: Uint8Array): string {
   return result;
 }
 
-/* ====================================================================
- * CertificateUtils Class
- * Migrated from C# implementation
- * ==================================================================== */
-
 /**
  * Extracts the 32-byte SEC1 private key scalar from a PKCS#8 or SEC1 PEM string.
  */
@@ -402,122 +376,4 @@ export function extractECPrivateKey(pem: string): Uint8Array {
   }
 
   throw new Error('Could not find EC private key in PEM');
-}
-
-/**
- * Signs a payload. Following the C# implementation, this converts the
- * input string to UTF-8 bytes, computes SHA-256 of those bytes, and
- * then signs the result using the ECDSA private key.
- */
-export async function signHashWithECDSABytes(
-  dataToSignStr: string,
-  privateKeyPem: string,
-): Promise<Uint8Array> {
-  const pkBytes = extractECPrivateKey(privateKeyPem);
-  const ec = new EC(EC_CURVE);
-  const keyPair = ec.keyFromPrivate(pkBytes);
-
-  // Replicating C# Encoding.UTF8.GetBytes(hashHex)
-  const utf8Bytes = new TextEncoder().encode(dataToSignStr);
-
-  // Replicating C# SignerUtilities.GetSigner("SHA-256withECDSA"),
-  // which calculates the SHA-256 hash before signing:
-  const hashBuf = await Crypto.digest(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    utf8Bytes.buffer as ArrayBuffer,
-  );
-
-  // Sign the digest
-  const signature = keyPair.sign(new Uint8Array(hashBuf));
-
-  // The signature must be DER encoded
-  return new Uint8Array(signature.toDER());
-}
-
-/**
- * Returns the base64-encoded ECDSA signature of the payload string.
- */
-export async function signHashWithECDSA2(
-  dataToSignStr: string,
-  privateKeyPem: string,
-): Promise<string> {
-  const sigBytes = await signHashWithECDSABytes(dataToSignStr, privateKeyPem);
-  return bytesToBase64(sigBytes);
-}
-
-/**
- * Hex conversion helper
- */
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-/**
- * CertificateUtils class closely matching the structure of the C#
- * CertificateUtils implementations. Methods requiring the certificate
- * or keys take them as arguments rather than reading from a global store.
- */
-export class CertificateUtils {
-  static async getDigestValue(certBase64: string): Promise<string> {
-    return getCertificateDigestValue(certBase64);
-  }
-
-  static GetCertificateSignature(certBase64: string): string {
-    return bytesToBase64(getCertificateSignatureBytes(certBase64));
-  }
-
-  static async SignHashWithECDSA2(hashHex: string, privateKeyPem: string): Promise<string> {
-    return signHashWithECDSA2(hashHex, privateKeyPem);
-  }
-
-  static async SignHashWithECDSABytes(hashHex: string, privateKeyPem: string): Promise<Uint8Array> {
-    return signHashWithECDSABytes(hashHex, privateKeyPem);
-  }
-
-  static LoadECPrivateKeyFromPem(privateKeyPem: string): Uint8Array {
-    return extractECPrivateKey(privateKeyPem);
-  }
-
-  static GetCertificateRaw(certBase64: string): Uint8Array {
-    return base64ToBytes(certBase64);
-  }
-
-  static GetCertificateIssuer(certBase64: string): string {
-    return getCertificateIssuer(certBase64);
-  }
-
-  static GetSerialNumber(certBase64: string): string {
-    return getSerialNumber(certBase64);
-  }
-
-  static GetPublicKeyHash(certBase64: string): string {
-    // Uncompressed public key base64 exactly matching GetPublicKeyHashBytes2 logic
-    return bytesToBase64(getPublicKeyBytes(certBase64));
-  }
-
-  static GetPublicKeyHashBytes2(certBase64: string): Uint8Array {
-    return getPublicKeyBytes(certBase64);
-  }
-
-  /**
-   * Equivalent to C# GetPublicKeyHashBytes, which strips PEM headers
-   * and base64 decodes the raw public key string.
-   */
-  static GetPublicKeyHashBytes(publicKeyPem: string): Uint8Array {
-    const b64 = publicKeyPem
-      .replace(/-----BEGIN PUBLIC KEY-----/g, '')
-      .replace(/-----END PUBLIC KEY-----/g, '')
-      .replace(/[\r\n\s]/g, '');
-    return base64ToBytes(b64);
-  }
-
-  static GetSignatureKeyHash(certBase64: string): string {
-    return bytesToHex(getCertificateSignatureBytes(certBase64)).toUpperCase();
-  }
-
-  static GetSignatureKeyHashBytes(certBase64: string): Uint8Array {
-    return getCertificateSignatureBytes(certBase64);
-  }
 }

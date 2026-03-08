@@ -4,105 +4,105 @@
 
 // ───────── Address ─────────
 export interface Address {
-  street: string;
-  buildingNumber: string;
-  plotIdentification: string;
-  citySubdivision: string;
-  city: string;
-  postalZone: string;
-  countrySubentity: string;
-  countryCode: string; // e.g. "SA"
+  readonly street: string;
+  readonly buildingNumber: string;
+  readonly plotIdentification: string;
+  readonly citySubdivision: string;
+  readonly city: string;
+  readonly postalZone: string;
+  readonly countrySubentity: string;
+  readonly countryCode: string; // e.g. "SA"
 }
 
 // ───────── Supplier / Seller ─────────
 export interface SupplierParty {
-  registrationName: string; // Company abbreviation / name
-  vatNumber: string; // Tax ID (CompanyID)
-  companyRegistrationNo: string; // CRN
-  address: Address;
+  readonly registrationName: string; // Company abbreviation / name
+  readonly vatNumber: string; // Tax ID (CompanyID)
+  readonly companyRegistrationNo: string; // CRN
+  readonly address: Address;
 }
 
 // ───────── Customer ─────────
 export interface CustomerParty {
-  registrationName: string;
-  vatNumber?: string;
-  address?: Address;
+  readonly registrationName: string;
+  readonly vatNumber?: string;
+  readonly address?: Address;
 }
 
 // ───────── Certificate config ─────────
 export interface CertificateConfig {
   /** Base-64 encoded certificate PEM (without BEGIN/END lines) */
-  certificateBase64: string;
+  readonly certificateBase64: string;
   /** Base-64 encoded private-key PEM (without BEGIN/END lines) */
-  privateKeyBase64: string;
+  readonly privateKeyBase64: string;
 }
 
 // ───────── Invoice item ─────────
 export interface InvoiceItem {
-  name: string;
-  quantity: number;
+  readonly name: string;
+  readonly quantity: number;
   /** Unit price (may be tax-inclusive depending on config) */
-  price: number;
+  readonly price: number;
   /** Tax percentage for this item, e.g. 15 */
-  taxPercentage: number;
+  readonly taxPercentage: number;
   /** UOM code, e.g. "PCE" */
-  unitOfMeasure: string;
+  readonly unitOfMeasure: string;
   /** Per-item discount amount (already applied to price) */
-  discount?: number;
+  readonly discount?: number;
 }
 
 // ───────── Full invoice ─────────
 export interface Invoice {
-  uuid: string;
-  invoiceNumber: string;
-  issueDate: string; // yyyy-MM-dd
-  issueTime: string; // HH:mm:ss
-  timestamp: string; // ISO-8601
+  readonly uuid: string;
+  readonly invoiceNumber: string;
+  readonly issueDate: string; // yyyy-MM-dd
+  readonly issueTime: string; // HH:mm:ss
+  readonly timestamp: string; // ISO-8601
 
-  supplier: SupplierParty;
-  customer: CustomerParty;
+  readonly supplier: SupplierParty;
+  readonly customer: CustomerParty;
 
-  previousInvoiceHash: string; // PIH – base-64 hash of previous invoice
+  readonly previousInvoiceHash: string; // PIH – base-64 hash of previous invoice
 
-  items: InvoiceItem[];
+  readonly items: readonly InvoiceItem[];
 
   /** Document-level discount amount */
-  discount: number;
+  readonly discount: number;
 
-  currency: string; // e.g. "SAR"
+  readonly currency: string; // e.g. "SAR"
 
   /** Whether item prices already include tax */
-  isTaxIncludedInPrice: boolean;
+  readonly isTaxIncludedInPrice: boolean;
 
   /** Invoice subtype code: '0100000' = Standard, '0200000' = Simplified. Defaults to INVOICE_SUBTYPE constant. */
-  invoiceSubtype?: string;
+  readonly invoiceSubtype?: string;
 }
 
 // ───────── Computed totals ─────────
 export interface InvoiceTotals {
   /** Sum of line extension amounts (price × qty, tax-exclusive) */
-  subtotal: number;
+  readonly subtotal: number;
   /** Total VAT amount */
-  totalTax: number;
+  readonly totalTax: number;
   /** subtotal + totalTax */
-  totalWithTax: number;
+  readonly totalWithTax: number;
   /** totalWithTax − discount */
-  payableAmount: number;
+  readonly payableAmount: number;
   /** Tax exclusive amount after applying document-level discounts */
-  taxableAmount: number;
+  readonly taxableAmount: number;
 }
 
 // ───────── Sales Return / Credit Note ─────────
 export interface SalesReturnInvoice extends Invoice {
   /** ID of the original invoice being returned / credited */
-  billingReferenceId: string;
+  readonly billingReferenceId: string;
 }
 
 // ───────── Pipeline result ─────────
 export interface InvoiceResult {
-  xml: string;
-  hash: string; // base-64 invoice hash
-  signature: string; // base-64 signature
-  qrBase64: string; // base-64 QR TLV payload
-  savedUri?: string; // local URI path where XML is saved
+  readonly xml: string;
+  readonly hash: string; // base-64 invoice hash
+  readonly signature: string; // base-64 signature
+  readonly qrBase64: string; // base-64 QR TLV payload
+  readonly savedUri?: string; // local URI path where XML is saved
 }

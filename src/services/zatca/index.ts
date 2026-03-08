@@ -20,7 +20,6 @@ export type { QRPayloadInput } from './qr';
 
 // ── Certificate utilities ──
 export {
-    CertificateUtils,
     getCertificateDigestValue,
     getCertificateIssuer,
     getCertificateSignatureBytes,
@@ -37,6 +36,9 @@ export { signHash } from './signer';
 
 // ── Totals ──
 export { calculateItemAmounts, calculateTotals } from './totals';
+
+// ── Errors ──
+export { ZatcaError } from './errors';
 
 // ── Types ──
 export type {
