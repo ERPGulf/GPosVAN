@@ -9,21 +9,14 @@
 import * as Crypto from 'expo-crypto';
 
 export async function getCertificateDigestValue(certBase64: string): Promise<string> {
-  // C# flow: SHA256(cert.RawData) → hex → base64(UTF8(hex))
-  // cert.RawData = raw DER bytes of the certificate
   const derBytes = decodeCertificate(certBase64);
 
   // SHA-256 hash of the raw DER bytes
   const hashBuf = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, derBytes as any);
   const hashBytes = new Uint8Array(hashBuf);
 
-  // Convert hash to lowercase hex string
-  const hexHash = Array.from(hashBytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-
-  // base64-encode the hex string (as UTF-8 bytes)
-  return bytesToBase64(new TextEncoder().encode(hexHash));
+  // Convert hash bytes directly to base64
+  return bytesToBase64(hashBytes);
 }
 
 /**
@@ -37,15 +30,11 @@ export function getCleanCertBody(certBase64: string): string {
     .replace(/\n/g, '')
     .trim();
 }
-/**
- * Extract the issuer distinguished-name as a human-readable string.
- * Example: "CN=TSZEINVOICE-SubCA-1, DC=extgazt, DC=gov, DC=local"
- */
 export function getCertificateIssuer(certBase64: string): string {
   const der = decodeCertificate(certBase64);
   const tbsCert = parseTBSCertificate(der);
-  // ZATCA expects Reverse order for Issuer Name: DC=..., DC=..., OU=..., O=..., C=...
-  return formatDN(tbsCert.issuer.reverse());
+  // Maintain standard order for Issuer Name
+  return formatDN(tbsCert.issuer);
 }
 
 /**

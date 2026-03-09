@@ -9,7 +9,6 @@
 /* ------------------------------------------------------------------ */
 
 import { ec as EC } from 'elliptic';
-import * as Crypto from 'expo-crypto';
 import { base64ToBytes, bytesToBase64, extractECPrivateKey } from './certificate';
 import { EC_CURVE } from './constants';
 
@@ -34,19 +33,12 @@ export async function signHash(
   hexHash: string,
   privateKeyBase64: string,
 ): Promise<{ derBase64: string; rawBytes: Uint8Array }> {
-  // Step 1+2: SHA-256 hash the hex hash string
-  // (C#: Encoding.UTF8.GetBytes(hashHex) → SHA-256withECDSA internally hashes)
-  // Using digestStringAsync to avoid Hermes TypedArray compatibility issues
-  const hashHex2 = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, hexHash, {
-    encoding: Crypto.CryptoEncoding.HEX,
-  });
-
-  // Convert hex hash result to bytes for ECDSA signing
+  // Convert hex hash back to bytes (which is the actual SHA-256 result of the XML)
   const hashBytes = new Uint8Array(
-    (hashHex2.match(/.{2}/g) || []).map((byte) => parseInt(byte, 16)),
+    (hexHash.match(/.{2}/g) || []).map((byte) => parseInt(byte, 16)),
   );
 
-  // Step 3: ECDSA sign the SHA-256 result
+  // ECDSA sign the raw SHA-256 hash bytes
   const pkBytes = extractECPrivateKey(new TextDecoder().decode(base64ToBytes(privateKeyBase64)));
   const key = ec.keyFromPrivate(Array.from(pkBytes));
 

@@ -10,7 +10,6 @@
 import * as Crypto from 'expo-crypto';
 import { DOMParser } from 'xmldom';
 
-import { bytesToBase64 } from './certificate';
 
 /* ====================================================================
  * 1. Remove signature-related nodes (string-based, preserves bytes)
@@ -240,10 +239,10 @@ export async function generateSignedPropertiesHash(
   xml += '                                    </xades:SignedSignatureProperties>\n';
   xml += '                                </xades:SignedProperties>';
 
-  // C# flow: SHA256 → hex → UTF8Bytes(hex) → base64
-  const hexHash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, xml, {
-    encoding: Crypto.CryptoEncoding.HEX,
+  // Compute standard SHA256 digest of the XML, encode to Base64
+  const base64Hash = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, xml, {
+    encoding: Crypto.CryptoEncoding.BASE64,
   });
 
-  return bytesToBase64(new TextEncoder().encode(hexHash));
+  return base64Hash;
 }
