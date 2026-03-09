@@ -1,25 +1,25 @@
 import {
-  clearCart,
-  removeFromCart,
-  selectCartItems,
-  selectTotal,
-  updateQuantity,
+    clearCart,
+    removeFromCart,
+    selectCartItems,
+    selectTotal,
+    updateQuantity,
 } from '@/src/features/cart/cartSlice';
 import { AddCustomerModal } from '@/src/features/customers/components/AddCustomerModal';
 import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
 import {
-  createInvoicePipeline,
-  saveInvoiceXML,
-  shareInvoiceXML,
+    createInvoicePipeline,
+    saveInvoiceXML,
+    shareInvoiceXML,
 } from '@/src/services/zatca/invoicePipeline';
 import type { Invoice } from '@/src/services/zatca/types';
 import {
-  getPreviousInvoiceHash,
-  isTaxIncludedInPrice,
-  certificate as zatcaCert,
-  supplier as zatcaSupplier,
+    getPreviousInvoiceHash,
+    isTaxIncludedInPrice,
+    certificate as zatcaCert,
+    supplier as zatcaSupplier,
 } from '@/src/services/zatca/zatcaConfig';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
@@ -56,6 +56,7 @@ export default function CheckoutPage() {
 
   // ZATCA Result State
   const [isZatcaModalVisible, setIsZatcaModalVisible] = useState(false);
+  const [invoiceType, setInvoiceType] = useState<'B2C' | 'B2B'>('B2C');
   const [zatcaResult, setZatcaResult] = useState<{
     xml: string;
     hash: string;
@@ -122,6 +123,7 @@ export default function CheckoutPage() {
         currency: 'SAR',
         discount: 0,
         isTaxIncludedInPrice,
+        invoiceSubtype: invoiceType === 'B2B' ? '0100000' : '0200000',
         items: cartItems.map((ci) => ({
           name: ci.product.name ?? 'Unknown Item',
           quantity: ci.quantity,
@@ -175,6 +177,66 @@ export default function CheckoutPage() {
       <ScrollView className="flex-1 p-6">
         <View>
           <Text className="text-2xl font-bold text-gray-800 mb-6">Checkout</Text>
+
+          {/* Invoice Type Section */}
+          <View className="mb-8">
+            <Text className="text-gray-600 font-medium mb-3">Invoice Type</Text>
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                onPress={() => setInvoiceType('B2C')}
+                className={`flex-1 p-4 rounded-xl border flex-row items-center ${
+                  invoiceType === 'B2C'
+                    ? 'border-indigo-500 bg-indigo-50'
+                    : 'border-gray-200 bg-white'
+                }`}>
+                <View
+                  className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${invoiceType === 'B2C' ? 'bg-indigo-100' : 'bg-gray-100'}`}>
+                  <Ionicons
+                    name="document-text-outline"
+                    size={20}
+                    color={invoiceType === 'B2C' ? '#6366f1' : '#6b7280'}
+                  />
+                </View>
+                <View className="flex-1">
+                  <Text
+                    className={`font-bold text-base ${invoiceType === 'B2C' ? 'text-indigo-900' : 'text-gray-800'}`}>
+                    B2C (Simplified)
+                  </Text>
+                  <Text className="text-gray-500 text-xs mt-0.5">Individual customers</Text>
+                </View>
+                {invoiceType === 'B2C' && (
+                  <Ionicons name="checkmark-circle" size={24} color="#6366f1" />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setInvoiceType('B2B')}
+                className={`flex-1 p-4 rounded-xl border flex-row items-center ${
+                  invoiceType === 'B2B'
+                    ? 'border-indigo-500 bg-indigo-50'
+                    : 'border-gray-200 bg-white'
+                }`}>
+                <View
+                  className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${invoiceType === 'B2B' ? 'bg-indigo-100' : 'bg-gray-100'}`}>
+                  <Ionicons
+                    name="business-outline"
+                    size={20}
+                    color={invoiceType === 'B2B' ? '#6366f1' : '#6b7280'}
+                  />
+                </View>
+                <View className="flex-1">
+                  <Text
+                    className={`font-bold text-base ${invoiceType === 'B2B' ? 'text-indigo-900' : 'text-gray-800'}`}>
+                    B2B (Standard)
+                  </Text>
+                  <Text className="text-gray-500 text-xs mt-0.5">Business-to-Business</Text>
+                </View>
+                {invoiceType === 'B2B' && (
+                  <Ionicons name="checkmark-circle" size={24} color="#6366f1" />
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
 
           {/* Select Customer Section */}
           <View className="mb-8" style={{ zIndex: 10 }}>
@@ -415,7 +477,9 @@ export default function CheckoutPage() {
                 </View>
                 <View>
                   <Text className="text-xl font-bold text-gray-800">Invoice Generated</Text>
-                  <Text className="text-sm text-green-600 font-medium">ZATCA B2C Standard</Text>
+                  <Text className="text-sm text-green-600 font-medium">
+                    ZATCA {invoiceType === 'B2B' ? 'B2B Standard' : 'B2C Simplified'}
+                  </Text>
                 </View>
               </View>
               <TouchableOpacity onPress={handleCloseZatcaModal} className="p-2">
