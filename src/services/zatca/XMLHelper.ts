@@ -1,5 +1,5 @@
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
-import { C14nCanonicalization } from 'xml-crypto';
+import { C14nCanonicalization } from 'xml-crypto/lib/c14n-canonicalization';
 
 // Types and constants
 import { INVOICE_SUBTYPE } from './constants';
@@ -372,7 +372,6 @@ export function injectUBLExtensions(
 
   // Provide the required attributes for UBLDocumentSignatures EXACTLY matching Node JS script
   const ublDocSigs = doc.createElementNS(xmlns_sbc, 'sbc:UBLDocumentSignatures');
-  // Explicitly set namespaces if xmldom refuses to print them otherwise
   ublDocSigs.setAttribute('xmlns:sbc', xmlns_sbc);
   ublDocSigs.setAttribute('xmlns:sig', xmlns_sig);
   ublDocSigs.setAttribute('xmlns:sac', xmlns_sac);

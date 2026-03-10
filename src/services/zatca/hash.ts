@@ -1,3 +1,4 @@
+import { Buffer } from 'buffer';
 import * as Crypto from 'expo-crypto';
 
 /**
@@ -11,8 +12,8 @@ export async function generateSignedPropertiesHash(
 ) {
   let xml = '';
   // Ensure the issuer Name is injected with commas replacing newlines
-  const formattedIssuer = issuerName.replaceAll("\r\n", ", ").replaceAll("\n", ", ");
-  
+  const formattedIssuer = issuerName.replaceAll('\r\n', ', ').replaceAll('\n', ', ');
+
   xml +=
     '<xades:SignedProperties xmlns:xades="http://uri.etsi.org/01903/v1.3.2#" Id="xadesSignedProperties">\n';
   xml += '                                    <xades:SignedSignatureProperties>\n';

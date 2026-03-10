@@ -42,11 +42,15 @@ export async function signHash(
   const pkBytes = extractECPrivateKeyBytes(privateKeyBase64);
   const key = ec.keyFromPrivate(Array.from(pkBytes));
 
-  // Like Node: crypto.sign('sha256', dataToSign, { key })
-  // We hash the exact string with SHA-256 then ECDSA sign
-  const digest = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, hashBytes);
+  // We hash the exact string with SHA-256 then ECDSA sign. digestStringAsync prevents bridge unboxing issues.
+  const hexHashDigest = await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    hexHash,
+    { encoding: Crypto.CryptoEncoding.HEX },
+  );
+  const digestBuffer = Buffer.from(hexHashDigest, 'hex');
 
-  const sig = key.sign(Array.from(new Uint8Array(digest)));
+  const sig = key.sign(Array.from(new Uint8Array(digestBuffer)));
   const derBytes = Buffer.from(sig.toDER());
 
   return {
