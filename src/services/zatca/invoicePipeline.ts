@@ -1,10 +1,7 @@
-/* ------------------------------------------------------------------ */
-/*  ZATCA E-Invoicing – invoice creation pipeline                     */
-/*                                                                    */
-/*  Replicates C# XMLHelper.CreateInvoice flow exactly.               */
-/* ------------------------------------------------------------------ */
 import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
+import * as Crypto from 'expo-crypto';
+import { Buffer } from 'buffer';
 
 import {
     getCertificateDigestValue,
@@ -15,65 +12,41 @@ import {
     getSerialNumber,
 } from './certificate';
 import { ZatcaError } from './errors';
-import { generateInvoiceHash, generateSignedPropertiesHash } from './hash';
+import { generateSignedPropertiesHash } from './hash';
 import { buildQRPayload } from './qr';
 import { signHash } from './signer';
 import { calculateTotals } from './totals';
 import type { Invoice, InvoiceResult } from './types';
-import { buildInvoiceXML, injectQRData, injectUBLExtensions } from './XMLHelper';
+import { buildInvoiceXML, injectQRData, injectUBLExtensions, serializeXML, canonicalizeDOM } from './XMLHelper';
 import { savePreviousInvoiceHash } from './zatcaConfig';
 
-/**
- * Full invoice creation pipeline — matches C# CreateInvoice flow:
- *
- * 1. Build base XML
- * 2. Hash base XML → { hex, base64 }
- * 3. Get certificate info (digest, issuer, serial)
- * 4. Generate signed properties hash
- * 5. Sign hex hash (C#: SignHashWithECDSABytes(invoiceHash.Item1))
- * 6. Inject UBL extensions with signature
- * 7. Build QR TLV payload
- * 8. Inject QR into XML
- * 9. Compute final hash → save as PIH
- */
 export async function createInvoicePipeline(
   invoice: Invoice,
   certificateBase64: string,
   privateKeyBase64: string,
 ): Promise<InvoiceResult> {
-  /* ── Validate inputs ── */
   if (!invoice.items.length) {
     throw new ZatcaError('validation', 'Invoice must contain at least one item.');
-  }
-  if (!certificateBase64) {
-    throw new ZatcaError('validation', 'Certificate base64 string is required.');
-  }
-  if (!privateKeyBase64) {
-    throw new ZatcaError('validation', 'Private key base64 string is required.');
   }
 
   try {
     /* ── 1. Build base XML ── */
-    const baseXml = buildInvoiceXML(invoice);
+    const baseXmlDoc = buildInvoiceXML(invoice);
 
-    /* ── 2. Hash the base XML ── */
-    const invoiceHash = await generateInvoiceHash(baseXml);
-    if (__DEV__) {
-      console.log('Invoice Hash (base64):', invoiceHash.base64);
-      console.log('Invoice Hash (hex):', invoiceHash.hex);
-    }
-
+    /* ── 2. Canonicalize XML & hash ── */
+    const canonicalXml = canonicalizeDOM(baseXmlDoc);
+    
+    // Create base64 and hex representation of the invoice hash
+    const invoiceHashBuf = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, canonicalXml, { encoding: Crypto.CryptoEncoding.HEX });
+    const invoiceHashBase64 = Buffer.from(invoiceHashBuf, 'hex').toString('base64');
+    
     /* ── 3. Certificate info ── */
     const certDigest = await getCertificateDigestValue(certificateBase64);
-    const issuerName = getCertificateIssuer(certificateBase64);
+    
+    // Explicitly replace line feeds for exact hashing
+    const issuerName = getCertificateIssuer(certificateBase64).replace(/\r?\n/g, ", ");
     const serialNumber = getSerialNumber(certificateBase64);
     const signingTime = `${invoice.issueDate}T${invoice.issueTime}`;
-
-    if (__DEV__) {
-      console.log('Cert Digest:', certDigest);
-      console.log('Issuer Name:', issuerName);
-      console.log('Serial Number:', serialNumber);
-    }
 
     /* ── 4. Signed properties hash ── */
     const signedPropsHash = await generateSignedPropertiesHash(
@@ -82,19 +55,18 @@ export async function createInvoicePipeline(
       serialNumber,
       certDigest,
     );
-    if (__DEV__) console.log('Signed Props Hash:', signedPropsHash);
 
     /* ── 5. Sign the hex hash ── */
-    const { derBase64: signatureBase64 } = await signHash(invoiceHash.hex, privateKeyBase64);
-    if (__DEV__) console.log('Signature (base64):', signatureBase64);
+    // Passes hex string of hash directly, matches Node.js crypto.sign
+    const { derBase64: signatureBase64 } = await signHash(invoiceHashBuf, privateKeyBase64);
 
-    /* ── 6. Get clean certificate body for X509Certificate element ── */
+    /* ── 6. Inject UBL extensions ── */
     const certificateBody = getCleanCertBody(certificateBase64);
-
-    /* ── 7. Inject UBL extensions ── */
-    const xmlWithExtensions = injectUBLExtensions(
-      baseXml,
-      invoiceHash.base64,
+    
+    // Mutates the live DOM Document
+    injectUBLExtensions(
+      baseXmlDoc,
+      invoiceHashBase64,
       signedPropsHash,
       signatureBase64,
       certificateBody,
@@ -104,38 +76,40 @@ export async function createInvoicePipeline(
       serialNumber,
     );
 
-    /* ── 8. Build QR payload ── */
+    /* ── 7. Build QR payload ── */
     const totals = calculateTotals(invoice.items, invoice.isTaxIncludedInPrice, invoice.discount);
+    
+    // ZATCA exact QR Buffers
     const publicKeyBytes = getPublicKeyBytes(certificateBase64);
+    // Certificate signature raw buffer
     const certSigBytes = getCertificateSignatureBytes(certificateBase64);
-
-    if (__DEV__) {
-      console.log('PublicKey length:', publicKeyBytes.length);
-      console.log('CertSignature length:', certSigBytes.length);
-    }
 
     const qrBase64 = buildQRPayload({
       sellerName: invoice.supplier.registrationName,
       vatNumber: invoice.supplier.vatNumber,
-      timestamp: signingTime,
-      total: totals.totalWithTax.toFixed(2),
-      vat: totals.totalTax.toFixed(2),
-      hash: invoiceHash.base64,
-      signatureBase64: signatureBase64,
-      publicKeyBytes,
-      certSignatureBytes: certSigBytes,
+      timestamp: signingTime, // Tag 3 String ISO
+      total: totals.totalWithTax.toFixed(2), // Tag 4 Decimal String
+      vat: totals.totalTax.toFixed(2), // Tag 5 Decimal string
+      hash: invoiceHashBase64, // Tag 6 Base64 hash encoded as text bytes
+      signatureBase64: signatureBase64, // Tag 7 Base64 signature encoded as text bytes 
+      publicKeyBytes, // Tag 8 Raw PublicKey Info Buffer
+      certSignatureBytes: certSigBytes, // Tag 9 Raw Certificate Signature Buffer
     });
 
-    /* ── 9. Inject QR into XML ── */
-    const finalXml = injectQRData(xmlWithExtensions, qrBase64);
+    /* ── 8. Inject QR into XML ── */
+    injectQRData(baseXmlDoc, qrBase64);
+    
+    // After appending Extensions and QA, we serialize the XML 
+    const finalXml = serializeXML(baseXmlDoc);
 
-    /* ── 10. Compute final hash → save as PIH for next invoice ── */
-    const finalHash = await generateInvoiceHash(finalXml);
-    await savePreviousInvoiceHash(finalHash.base64);
+    /* ── 9. Compute final hash → save as PIH for next invoice ── */
+    const finalCanonical = canonicalizeDOM(baseXmlDoc);
+    const finalHashBuf = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, finalCanonical, { encoding: Crypto.CryptoEncoding.BASE64 });
+    await savePreviousInvoiceHash(finalHashBuf);
 
     return {
       xml: finalXml,
-      hash: invoiceHash.base64,
+      hash: invoiceHashBase64,
       signature: signatureBase64,
       qrBase64,
       savedUri: undefined,
@@ -150,35 +124,23 @@ export async function createInvoicePipeline(
   }
 }
 
-/**
- * Utility to save the generated XML to the device's Document folder
- * and optionally prompt the user to share/save it.
- */
 export async function saveInvoiceXML(invoiceNumber: string, xmlContent: string) {
   const dir = new Directory(Paths.document, 'zatca_invoices');
-
   const dirInfo = dir.info();
   if (!dirInfo.exists) {
     dir.create({ intermediates: true });
   }
 
   const file = new File(dir, `Invoice_${invoiceNumber}_${Date.now()}.xml`);
-
   const fileInfo = file.info();
   if (fileInfo.exists) {
     file.delete();
   }
 
   file.write(xmlContent);
-
-  if (__DEV__) console.log('Saved invoice XML:', file.uri);
-
   return file.uri;
 }
 
-/**
- * Utility to trigger the native share dialog for the saved XML file
- */
 export async function shareInvoiceXML(fileUri: string) {
   try {
     const isAvailable = await Sharing.isAvailableAsync();

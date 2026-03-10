@@ -1,53 +1,82 @@
-/* ------------------------------------------------------------------ */
-/*  ZATCA E-Invoicing – QR TLV payload builder                        */
-/* ------------------------------------------------------------------ */
-
-import { bytesToBase64 } from './certificate';
-import { encodeTLV, encodeTLVBytes } from './tlv';
+import { Buffer } from 'buffer';
 
 export interface QRPayloadInput {
-  sellerName: string;
-  vatNumber: string;
-  timestamp: string;
-  total: string;
-  vat: string;
-  hash: string; // base-64 invoice hash
-  signatureBase64: string; // base-64 digital signature
-  publicKeyBytes: Uint8Array; // raw bytes for tag 8
-  certSignatureBytes: Uint8Array; // raw bytes for tag 9
+    sellerName: string;
+    vatNumber: string;
+    timestamp: string;
+    total: string;
+    vat: string;
+    hash: string;              // base-64 invoice hash
+    signatureBase64: string;   // base-64 digital signature
+    publicKeyBytes: Buffer;    // raw bytes for tag 8
+    certSignatureBytes: Buffer;// raw bytes for tag 9
 }
 
-/**
- * Build the ZATCA QR TLV payload and return it as a base-64 string.
- *
- * ZATCA TLV encoding:
- *  - Tags 1-5: UTF-8 string values
- *  - Tag 6: invoice hash as string (base64 hash encoded as UTF-8 bytes)
- *  - Tag 7: digital signature as string (base64 signature encoded as UTF-8 bytes)
- *  - Tag 8: raw public key bytes
- *  - Tag 9: raw certificate signature bytes
- */
 export function buildQRPayload(data: QRPayloadInput): string {
-  const tags: Uint8Array[] = [
-    encodeTLV(1, data.sellerName),
-    encodeTLV(2, data.vatNumber),
-    encodeTLV(3, data.timestamp),
-    encodeTLV(4, data.total),
-    encodeTLV(5, data.vat),
-    encodeTLV(6, data.hash), // base64 string as UTF-8 bytes
-    encodeTLV(7, data.signatureBase64), // base64 string as UTF-8 bytes
-    encodeTLVBytes(8, data.publicKeyBytes),
-    encodeTLVBytes(9, data.certSignatureBytes),
-  ];
+    const tagsBufsArray: Buffer[] = [];
 
-  const totalLength = tags.reduce((sum, t) => sum + t.length, 0);
-  const merged = new Uint8Array(totalLength);
-  let offset = 0;
+    // Tag 1: Seller Name
+    tagsBufsArray.push(getTlvForValue(1, data.sellerName));
+    // Tag 2: VAT Registration Number
+    tagsBufsArray.push(getTlvForValue(2, data.vatNumber));
+    // Tag 3: Time Stamp (ISO 8601)
+    tagsBufsArray.push(getTlvForValue(3, data.timestamp));
+    // Tag 4: Invoice Total (with VAT)
+    tagsBufsArray.push(getTlvForValue(4, data.total));
+    // Tag 5: VAT Total
+    tagsBufsArray.push(getTlvForValue(5, data.vat));
+    // Tag 6: XML Hash
+    // Like the Node JS reference, just supply the base64 string and UTF-8 encode it
+    tagsBufsArray.push(getTlvForValue(6, data.hash));
+    // Tag 7: ECDSA Signature Value
+    tagsBufsArray.push(getTlvForValue(7, data.signatureBase64)); 
+    // Tag 8: Public Key
+    tagsBufsArray.push(getTlvForValue(8, data.publicKeyBytes));
+    // Tag 9: Signature of the Public Key (ZATCA Requirement)
+    tagsBufsArray.push(getTlvForValue(9, data.certSignatureBytes));
 
-  for (const tag of tags) {
-    merged.set(tag, offset);
-    offset += tag.length;
-  }
+    const totalBytes = Buffer.concat(tagsBufsArray);
+    return totalBytes.toString('base64');
+}
 
-  return bytesToBase64(merged);
+export function getTlvForValue(tagNum: number, tagValue: string | Buffer | Uint8Array): Buffer {
+    try {
+        if (tagValue === null || tagValue === undefined) {
+            throw new Error(`Error: Tag value for tag number ${tagNum} is null`);
+        }
+
+        let tagValueBytes: Buffer;
+
+        // Step 1: Handle string or buffer tag value
+        if (typeof tagValue === 'string') {
+            tagValueBytes = Buffer.from(tagValue, 'utf8');
+        } else if (Buffer.isBuffer(tagValue)) {
+            tagValueBytes = tagValue;
+        } else if (tagValue instanceof Uint8Array) {
+            tagValueBytes = Buffer.from(tagValue);
+        } else {
+            // Fallback for numbers or objects
+            tagValueBytes = Buffer.from((tagValue as any).toString(), 'utf8');
+        }
+
+        // Step 2: Determine length buffer (handles lengths > 255)
+        let tagValueLenBuf: Buffer;
+        if (tagValueBytes.length < 256) {
+            tagValueLenBuf = Buffer.from([tagValueBytes.length]);
+        } else {
+            // Length > 255 requires 3 bytes: [0xFF, HighByte, LowByte]
+            tagValueLenBuf = Buffer.from([
+                0xFF,
+                (tagValueBytes.length >> 8) & 0xFF,
+                tagValueBytes.length & 0xFF
+            ]);
+        }
+
+        const tagNumBuf = Buffer.from([tagNum]);
+
+        // Step 3: Combine Tag + Length + Value
+        return Buffer.concat([tagNumBuf, tagValueLenBuf, tagValueBytes]);
+    } catch (ex: any) {
+        throw new Error("Error in getting the TLV data value: " + ex.message);
+    }
 }

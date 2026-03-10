@@ -29,7 +29,7 @@ export {
 } from './certificate';
 
 // ── Hashing ──
-export { generateInvoiceHash, generateSignedPropertiesHash } from './hash';
+export { generateSignedPropertiesHash } from './hash';
 
 // ── Signing ──
 export { signHash } from './signer';

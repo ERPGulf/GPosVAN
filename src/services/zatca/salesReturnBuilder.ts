@@ -1,140 +1,144 @@
-/* ------------------------------------------------------------------ */
-/*  ZATCA E-Invoicing – Credit Note / Sales Return UBL 2.1 XML        */
-/*                                                                    */
-/*  Mirrors XMLHelper.ts but builds InvoiceTypeCode 381 (credit note) */
-/*  and adds a BillingReference to the original invoice.              */
-/* ------------------------------------------------------------------ */
-
+import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { INVOICE_SUBTYPE, NS } from './constants';
-import { calculateTotals } from './totals';
+import { calculateItemAmounts, calculateTotals } from './totals';
 import type { SalesReturnInvoice } from './types';
 import {
-    buildAllowanceCharge,
-    buildCustomerParty,
-    buildDSSignature,
-    buildInvoiceLines,
-    buildLegalMonetaryTotal,
-    buildSupplierParty,
-    buildTaxTotalWithSubtotal,
-    esc,
+    injectQRData,
+    injectUBLExtensions,
 } from './XMLHelper';
 
-/* ====================================================================
- * Build credit note XML (without UBL Extensions)
- * ==================================================================== */
+export function buildSalesReturnXML(invoice: SalesReturnInvoice): Document {
+  const doc = new DOMParser().parseFromString('<Invoice/>', 'text/xml');
+  const root = doc.documentElement;
 
-export function buildSalesReturnXML(invoice: SalesReturnInvoice): string {
-  const totals = calculateTotals(invoice.items, invoice.isTaxIncludedInPrice, invoice.discount);
-  const f = (n: number) => n.toFixed(2);
-  const cur = invoice.currency;
-
-  let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
-  xml += `<Invoice xmlns="${NS.ubl}" xmlns:cac="${NS.cac}" xmlns:cbc="${NS.cbc}" xmlns:ext="${NS.ext}">`;
+  root.setAttribute("xmlns", NS.ubl);
+  root.setAttribute("xmlns:cac", NS.cac);
+  root.setAttribute("xmlns:cbc", NS.cbc);
+  root.setAttribute("xmlns:ext", NS.ext);
 
   const invoiceSubtype = invoice.invoiceSubtype ?? INVOICE_SUBTYPE;
+  const cur = invoice.currency;
 
-  /* ── Base tags (type 381 = credit note) ── */
-  xml += `\n  <cbc:ProfileID>reporting:1.0</cbc:ProfileID>`;
-  xml += `\n  <cbc:ID>ACC-SINV-${new Date().getFullYear()}-${esc(invoice.invoiceNumber)}</cbc:ID>`;
-  xml += `\n  <cbc:UUID>${esc(invoice.uuid)}</cbc:UUID>`;
-  xml += `\n  <cbc:IssueDate>${esc(invoice.issueDate)}</cbc:IssueDate>`;
-  xml += `\n  <cbc:IssueTime>${esc(invoice.issueTime)}</cbc:IssueTime>`;
-  xml += `\n  <cbc:InvoiceTypeCode name="${invoiceSubtype}">381</cbc:InvoiceTypeCode>`;
-  xml += `\n  <cbc:DocumentCurrencyCode>${cur}</cbc:DocumentCurrencyCode>`;
-  xml += `\n  <cbc:TaxCurrencyCode>${cur}</cbc:TaxCurrencyCode>`;
+  appendCbc(doc, root, "ProfileID", "reporting:1.0");
+  appendCbc(doc, root, "ID", `ACC-SINV-${new Date().getFullYear()}-${invoice.invoiceNumber}`);
+  appendCbc(doc, root, "UUID", invoice.uuid);
+  appendCbc(doc, root, "IssueDate", invoice.issueDate);
+  appendCbc(doc, root, "IssueTime", invoice.issueTime);
 
-  /* ── ICV ── */
+  const typeCode = doc.createElement("cbc:InvoiceTypeCode");
+  typeCode.setAttribute("name", invoiceSubtype);
+  typeCode.textContent = "381";
+  root.appendChild(typeCode);
+
+  appendCbc(doc, root, "DocumentCurrencyCode", cur);
+  appendCbc(doc, root, "TaxCurrencyCode", cur);
+
+  // ICV Reference
+  const icv = doc.createElement("cac:AdditionalDocumentReference");
+  appendCbc(doc, icv, "ID", "ICV");
   const icvNum = invoice.invoiceNumber.replace(/[^0-9]/g, '');
-  xml += `
-  <cac:AdditionalDocumentReference>
-    <cbc:ID>ICV</cbc:ID>
-    <cbc:UUID>${esc(icvNum)}</cbc:UUID>
-  </cac:AdditionalDocumentReference>`;
+  appendCbc(doc, icv, "UUID", icvNum);
+  root.appendChild(icv);
 
-  /* ── PIH ── */
-  xml += `\n  <cac:AdditionalDocumentReference>`;
-  xml += `\n    <cbc:ID>PIH</cbc:ID>`;
-  xml += `\n    <cac:Attachment>`;
-  xml += `\n      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">${esc(invoice.previousInvoiceHash)}</cbc:EmbeddedDocumentBinaryObject>`;
-  xml += `\n    </cac:Attachment>`;
-  xml += `\n  </cac:AdditionalDocumentReference>`;
+  // PIH Reference
+  const ref = doc.createElement("cac:AdditionalDocumentReference");
+  appendCbc(doc, ref, "ID", "PIH");
+  const attach = doc.createElement("cac:Attachment");
+  const bin = doc.createElement("cbc:EmbeddedDocumentBinaryObject");
+  bin.setAttribute("mimeCode", "text/plain");
+  bin.textContent = invoice.previousInvoiceHash;
+  attach.appendChild(bin);
+  ref.appendChild(attach);
+  root.appendChild(ref);
 
-  /* ── QR Placeholder ── */
-  xml += `\n  <cac:AdditionalDocumentReference>`;
-  xml += `\n    <cbc:ID>QR</cbc:ID>`;
-  xml += `\n    <cac:Attachment>`;
-  xml += `\n      <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">PLACEHOLDER_QR</cbc:EmbeddedDocumentBinaryObject>`;
-  xml += `\n    </cac:Attachment>`;
-  xml += `\n  </cac:AdditionalDocumentReference>`;
+  // Billing Reference (original invoice being returned)
+  const billingRef = doc.createElement("cac:BillingReference");
+  const invDocRef = doc.createElement("cac:InvoiceDocumentReference");
+  appendCbc(doc, invDocRef, "ID", invoice.billingReferenceId);
+  billingRef.appendChild(invDocRef);
+  root.appendChild(billingRef);
 
-  /* ── Billing Reference (original invoice being returned) ── */
-  xml += `
-  <cac:BillingReference>
-    <cac:InvoiceDocumentReference>
-      <cbc:ID>${esc(invoice.billingReferenceId)}</cbc:ID>
-    </cac:InvoiceDocumentReference>
-  </cac:BillingReference>`;
+  addAccountingSupplierParty(doc, root, invoice.supplier);
+  addAccountingCustomerParty(doc, root, invoice.customer);
+  
+  const delivery = doc.createElement("cac:Delivery");
+  appendCbc(doc, delivery, "ActualDeliveryDate", invoice.issueDate.split('T')[0]);
+  root.appendChild(delivery);
 
-  /* ── Signature element ── */
-  xml += `
-  <cac:Signature>
-    <cbc:ID>urn:oasis:names:specification:ubl:signature:Invoice</cbc:ID>
-    <cbc:SignatureMethod>urn:oasis:names:specification:ubl:dsig:enveloped:xades</cbc:SignatureMethod>
-  </cac:Signature>`;
+  const payment = doc.createElement("cac:PaymentMeans");
+  appendCbc(doc, payment, "PaymentMeansCode", "30");
+  root.appendChild(payment);
 
-  /* ── Supplier ── */
-  xml += buildSupplierParty(invoice);
+  if (invoice.discount && invoice.discount > 0) {
+      addAllowanceCharge(doc, root, invoice.discount, cur);
+  }
 
-  /* ── Customer ── */
-  xml += buildCustomerParty(invoice);
+  const totals = calculateTotals(invoice.items, invoice.isTaxIncludedInPrice, invoice.discount);
+  
+  const tt1 = doc.createElement("cac:TaxTotal");
+  appendCbcAmount(doc, tt1, "TaxAmount", totals.totalTax, "currencyID", cur);
+  root.appendChild(tt1);
 
-  /* ── Delivery ── */
-  xml += `
-  <cac:Delivery>
-    <cbc:ActualDeliveryDate>${esc(invoice.issueDate)}</cbc:ActualDeliveryDate>
-  </cac:Delivery>`;
+  addTaxTotal(doc, root, totals.totalTax, totals.taxableAmount, cur);
+  
+  const lmt = doc.createElement("cac:LegalMonetaryTotal");
+  appendCbcAmount(doc, lmt, "LineExtensionAmount", totals.subtotal, "currencyID", cur);
+  appendCbcAmount(doc, lmt, "TaxExclusiveAmount", totals.taxableAmount, "currencyID", cur);
+  appendCbcAmount(doc, lmt, "TaxInclusiveAmount", totals.totalWithTax, "currencyID", cur);
+  appendCbcAmount(doc, lmt, "AllowanceTotalAmount", invoice.discount ?? 0, "currencyID", cur);
+  appendCbcAmount(doc, lmt, "PayableAmount", totals.payableAmount, "currencyID", cur);
+  root.appendChild(lmt);
 
-  /* ── PaymentMeans ── */
-  xml += `
-  <cac:PaymentMeans>
-    <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>
-  </cac:PaymentMeans>`;
+  invoice.items.forEach((item, index) => {
+    const { lineExtension, tax } = calculateItemAmounts(item, invoice.isTaxIncludedInPrice);
+    const unitPrice = invoice.isTaxIncludedInPrice ? lineExtension / item.quantity : item.price;
 
-  /* ── AllowanceCharge ── */
-  xml += buildAllowanceCharge(invoice);
+    const line = doc.createElement("cac:InvoiceLine");
+    appendCbc(doc, line, "ID", (index + 1).toString());
+    appendCbcAmount(doc, line, "InvoicedQuantity", item.quantity, "unitCode", item.unitOfMeasure);
+    appendCbcAmount(doc, line, "LineExtensionAmount", lineExtension, "currencyID", cur);
 
-  /* ── TaxTotal ── */
-  xml += `
-  <cac:TaxTotal>
-    <cbc:TaxAmount currencyID="${cur}">${f(totals.totalTax)}</cbc:TaxAmount>
-  </cac:TaxTotal>`;
+    const totalTaxLine = doc.createElement("cac:TaxTotal");
+    const taxAmountTag = doc.createElement("cbc:TaxAmount");
+    taxAmountTag.setAttribute("currencyID", cur);
+    taxAmountTag.textContent = tax.toFixed(2);
 
-  xml += buildTaxTotalWithSubtotal(totals.totalTax, totals.taxableAmount, cur);
+    const roundingAmount = doc.createElement("cbc:RoundingAmount");
+    roundingAmount.setAttribute("currencyID", cur);
+    roundingAmount.textContent = (lineExtension + tax).toFixed(2);
 
-  /* ── LegalMonetaryTotal ── */
-  xml += buildLegalMonetaryTotal(totals, invoice.discount, cur);
+    totalTaxLine.appendChild(taxAmountTag);
+    totalTaxLine.appendChild(roundingAmount);
+    line.appendChild(totalTaxLine);
 
-  /* ── InvoiceLines ── */
-  xml += buildInvoiceLines(invoice);
+    const itemTag = doc.createElement("cac:Item");
+    appendCbc(doc, itemTag, "Name", item.name);
+    
+    const taxCategory = doc.createElement("cac:ClassifiedTaxCategory");
+    appendCbc(doc, taxCategory, "ID", "S");
+    appendCbc(doc, taxCategory, "Percent", "15.00");
+    const taxScheme = doc.createElement("cac:TaxScheme");
+    appendCbc(doc, taxScheme, "ID", "VAT");
+    taxCategory.appendChild(taxScheme);
+    itemTag.appendChild(taxCategory);
+    line.appendChild(itemTag);
 
-  xml += `</Invoice>`;
+    const price = doc.createElement("cac:Price");
+    appendCbcAmount(doc, price, "PriceAmount", unitPrice, "currencyID", cur);
+    line.appendChild(price);
 
-  return xml;
+    root.appendChild(line);
+  });
+
+  return doc;
 }
 
-/**
- * Inject the QR base-64 payload into the placeholder.
- */
-export function injectSalesReturnQRData(xml: string, qrBase64: string): string {
-  return xml.replace('PLACEHOLDER_QR', qrBase64);
+export function injectSalesReturnQRData(doc: Document, qrBase64: string): void {
+  injectQRData(doc, qrBase64);
 }
 
-/**
- * Inject UBL Extensions (digital signature block) into the credit note XML.
- * Identical logic to XMLHelper.injectUBLExtensions.
- */
 export function injectSalesReturnUBLExtensions(
-  xml: string,
+  doc: Document,
   invoiceHashBase64: string,
   signedPropsHash: string,
   signatureValueBase64: string,
@@ -143,33 +147,132 @@ export function injectSalesReturnUBLExtensions(
   certificateDigest: string,
   issuerName: string,
   serialNumber: string,
-): string {
-  const dsSignature = buildDSSignature(
-    invoiceHashBase64,
-    signedPropsHash,
-    signatureValueBase64,
-    certificateBody,
-    signingTime,
-    certificateDigest,
-    issuerName,
-    serialNumber,
+): void {
+  injectUBLExtensions(
+      doc,
+      invoiceHashBase64,
+      signedPropsHash,
+      signatureValueBase64,
+      certificateBody,
+      signingTime,
+      certificateDigest,
+      issuerName,
+      serialNumber
   );
+}
 
-  let ext = '';
-  ext += `\n<ext:UBLExtensions>`;
-  ext += `\n    <ext:UBLExtension>`;
-  ext += `\n        <ext:ExtensionURI>urn:oasis:names:specification:ubl:dsig:enveloped:xades</ext:ExtensionURI>`;
-  ext += `\n        <ext:ExtensionContent>`;
-  ext += `\n            <sig:UBLDocumentSignatures xmlns:sig="${NS.sig}" xmlns:sac="${NS.sac}" xmlns:sbc="${NS.sbc}">`;
-  ext += `\n                <sac:SignatureInformation>`;
-  ext += `\n                    <cbc:ID>urn:oasis:names:specification:ubl:signature:1</cbc:ID>`;
-  ext += `\n                    <sbc:ReferencedSignatureID>urn:oasis:names:specification:ubl:signature:Invoice</sbc:ReferencedSignatureID>`;
-  ext += `\n                    ${dsSignature}`;
-  ext += `\n                </sac:SignatureInformation>`;
-  ext += `\n            </sig:UBLDocumentSignatures>`;
-  ext += `\n        </ext:ExtensionContent>`;
-  ext += `\n    </ext:UBLExtension>`;
-  ext += `\n</ext:UBLExtensions>`;
+// Internal Builders duplicate
+function appendCbc(doc: Document, parent: Element, tag: string, val: string) {
+    const el = doc.createElement(`cbc:${tag}`);
+    el.textContent = val;
+    parent.appendChild(el);
+}
 
-  return xml.replace(/<Invoice[\s\S]*?>/, (match) => match + ext);
+function appendCbcAmount(doc: Document, parent: Element, tag: string, val: number, attr: string, attrVal: string) {
+    const el = doc.createElement(`cbc:${tag}`);
+    el.setAttribute(attr, attrVal);
+    el.textContent = val.toFixed(2);
+    parent.appendChild(el);
+}
+
+function addAccountingSupplierParty(doc: Document, root: Element, supplier: any) {
+    const asp = doc.createElement("cac:AccountingSupplierParty");
+    const party = doc.createElement("cac:Party");
+
+    const partyId = doc.createElement("cac:PartyIdentification");
+    const id = doc.createElement("cbc:ID");
+    id.setAttribute("schemeID", "CRN");
+    id.textContent = supplier.companyRegistrationNo;
+    partyId.appendChild(id);
+    party.appendChild(partyId);
+
+    const addr = doc.createElement("cac:PostalAddress");
+    appendCbc(doc, addr, "StreetName", supplier.address.street);
+    appendCbc(doc, addr, "BuildingNumber", supplier.address.buildingNumber || "0");
+    appendCbc(doc, addr, "PlotIdentification", supplier.address.plotIdentification);
+    appendCbc(doc, addr, "CitySubdivisionName", supplier.address.citySubdivision);
+    appendCbc(doc, addr, "CityName", supplier.address.city);
+    appendCbc(doc, addr, "PostalZone", (supplier.address.postalZone || "00000").substring(0,5));
+    appendCbc(doc, addr, "CountrySubentity", supplier.address.countrySubentity);
+    
+    const country = doc.createElement("cac:Country");
+    appendCbc(doc, country, "IdentificationCode", supplier.address.countryCode);
+    addr.appendChild(country);
+    party.appendChild(addr);
+
+    const pts = doc.createElement("cac:PartyTaxScheme");
+    appendCbc(doc, pts, "CompanyID", supplier.vatNumber);
+    const ts = doc.createElement("cac:TaxScheme");
+    appendCbc(doc, ts, "ID", "VAT");
+    pts.appendChild(ts);
+    party.appendChild(pts);
+
+    const pName = doc.createElement("cac:PartyLegalEntity");
+    appendCbc(doc, pName, "RegistrationName", supplier.registrationName);
+    party.appendChild(pName);
+
+    asp.appendChild(party);
+    root.appendChild(asp);
+}
+
+function addAccountingCustomerParty(doc: Document, root: Element, customer: any) {
+    const acp = doc.createElement("cac:AccountingCustomerParty");
+    const party = doc.createElement("cac:Party");
+
+    const partyScheme = doc.createElement("cac:PartyTaxScheme");
+    const taxScheme = doc.createElement("cac:TaxScheme");
+    const taxId = doc.createElement("cbc:ID");
+    taxId.textContent = "VAT";
+    taxScheme.appendChild(taxId);
+    partyScheme.appendChild(taxScheme);
+    party.appendChild(partyScheme);
+
+    const pName = doc.createElement("cac:PartyLegalEntity");
+    appendCbc(doc, pName, "RegistrationName", customer.registrationName);
+    party.appendChild(pName);
+
+    acp.appendChild(party);
+    root.appendChild(acp);
+}
+
+function addAllowanceCharge(doc: Document, root: Element, discountAmount: number, cur: string) {
+    const allowanceCharge = doc.createElement("cac:AllowanceCharge");
+    const id = doc.createElement("cbc:ChargeIndicator");
+    id.textContent = "false";
+    allowanceCharge.appendChild(id);
+    const reasonCode = doc.createElement("cbc:AllowanceChargeReasonCode");
+    reasonCode.textContent = "95";
+    allowanceCharge.appendChild(reasonCode);
+    const reason = doc.createElement("cbc:AllowanceChargeReason");
+    reason.textContent = "Discount";
+    allowanceCharge.appendChild(reason);
+    const amount = doc.createElement("cbc:Amount");
+    amount.setAttribute("currencyID", cur);
+    amount.textContent = discountAmount.toFixed(2);
+    allowanceCharge.appendChild(amount);
+    const taxCategory = doc.createElement("cac:TaxCategory");
+    appendCbc(doc, taxCategory, "ID", "S");
+    appendCbc(doc, taxCategory, "Percent", "15.00");
+    const taxScheme = doc.createElement("cac:TaxScheme");
+    appendCbc(doc, taxScheme, "ID", "VAT");
+    taxCategory.appendChild(taxScheme);
+    allowanceCharge.appendChild(taxCategory);
+    root.appendChild(allowanceCharge);
+}
+
+function addTaxTotal(doc: Document, root: Element, taxAmount: number, taxableAmount: number, cur: string) {
+    const tt2 = doc.createElement("cac:TaxTotal");
+    appendCbcAmount(doc, tt2, "TaxAmount", taxAmount, "currencyID", cur);
+    const sub = doc.createElement("cac:TaxSubtotal");
+    appendCbcAmount(doc, sub, "TaxableAmount", taxableAmount, "currencyID", cur);
+    appendCbcAmount(doc, sub, "TaxAmount", taxAmount, "currencyID", cur);
+    const cat = doc.createElement("cac:TaxCategory");
+    appendCbc(doc, cat, "ID", "S");
+    appendCbc(doc, cat, "Percent", "15.00");
+    const ts = doc.createElement("cac:TaxScheme");
+    appendCbc(doc, ts, "ID", "VAT");
+    cat.appendChild(ts);
+    sub.appendChild(cat);
+    tt2.appendChild(sub);
+    root.appendChild(tt2);
 }

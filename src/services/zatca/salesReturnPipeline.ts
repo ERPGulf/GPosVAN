@@ -1,8 +1,8 @@
-/* ------------------------------------------------------------------ */
-/*  ZATCA E-Invoicing – credit note (sales return) creation pipeline  */
-/*                                                                    */
-/*  Mirrors invoicePipeline.ts but uses the sales return XML builder. */
-/* ------------------------------------------------------------------ */
+import { Directory, File, Paths } from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import * as Crypto from 'expo-crypto';
+import { Buffer } from 'buffer';
+
 import {
     getCertificateDigestValue,
     getCertificateIssuer,
@@ -12,7 +12,7 @@ import {
     getSerialNumber,
 } from './certificate';
 import { ZatcaError } from './errors';
-import { generateInvoiceHash, generateSignedPropertiesHash } from './hash';
+import { generateSignedPropertiesHash } from './hash';
 import { buildQRPayload } from './qr';
 import {
     buildSalesReturnXML,
@@ -23,54 +23,32 @@ import { signHash } from './signer';
 import { calculateTotals } from './totals';
 import type { InvoiceResult, SalesReturnInvoice } from './types';
 import { savePreviousInvoiceHash } from './zatcaConfig';
+import { serializeXML, canonicalizeDOM } from './XMLHelper';
 
-/**
- * Full credit-note creation pipeline — same steps as the invoice
- * pipeline but using InvoiceTypeCode 381 and BillingReference.
- *
- * 1. Build base credit note XML
- * 2. Hash base XML → { hex, base64 }
- * 3. Get certificate info (digest, issuer, serial)
- * 4. Generate signed properties hash
- * 5. Sign hex hash
- * 6. Inject UBL extensions with signature
- * 7. Build QR TLV payload
- * 8. Inject QR into XML
- * 9. Compute final hash → save as PIH
- */
 export async function createSalesReturnPipeline(
   invoice: SalesReturnInvoice,
   certificateBase64: string,
   privateKeyBase64: string,
 ): Promise<InvoiceResult> {
-  /* ── Validate inputs ── */
   if (!invoice.items.length) {
     throw new ZatcaError('validation', 'Credit note must contain at least one item.');
-  }
-  if (!certificateBase64) {
-    throw new ZatcaError('validation', 'Certificate base64 string is required.');
-  }
-  if (!privateKeyBase64) {
-    throw new ZatcaError('validation', 'Private key base64 string is required.');
   }
   if (!invoice.billingReferenceId) {
     throw new ZatcaError('validation', 'Billing reference ID is required for credit notes.');
   }
 
   try {
-    /* ── 1. Build base XML ── */
-    const baseXml = buildSalesReturnXML(invoice);
+    const baseXmlDoc = buildSalesReturnXML(invoice);
+    const canonicalXml = canonicalizeDOM(baseXmlDoc);
 
-    /* ── 2. Hash the base XML ── */
-    const invoiceHash = await generateInvoiceHash(baseXml);
-
-    /* ── 3. Certificate info ── */
+    const invoiceHashBuf = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, canonicalXml, { encoding: Crypto.CryptoEncoding.HEX });
+    const invoiceHashBase64 = Buffer.from(invoiceHashBuf, 'hex').toString('base64');
+    
     const certDigest = await getCertificateDigestValue(certificateBase64);
-    const issuerName = getCertificateIssuer(certificateBase64);
+    const issuerName = getCertificateIssuer(certificateBase64).replace(/\r?\n/g, ", ");
     const serialNumber = getSerialNumber(certificateBase64);
     const signingTime = `${invoice.issueDate}T${invoice.issueTime}`;
 
-    /* ── 4. Signed properties hash ── */
     const signedPropsHash = await generateSignedPropertiesHash(
       signingTime,
       issuerName,
@@ -78,16 +56,12 @@ export async function createSalesReturnPipeline(
       certDigest,
     );
 
-    /* ── 5. Sign the hex hash ── */
-    const { derBase64: signatureBase64 } = await signHash(invoiceHash.hex, privateKeyBase64);
-
-    /* ── 6. Get clean certificate body ── */
+    const { derBase64: signatureBase64 } = await signHash(invoiceHashBuf, privateKeyBase64);
     const certificateBody = getCleanCertBody(certificateBase64);
 
-    /* ── 7. Inject UBL extensions ── */
-    const xmlWithExtensions = injectSalesReturnUBLExtensions(
-      baseXml,
-      invoiceHash.base64,
+    injectSalesReturnUBLExtensions(
+      baseXmlDoc,
+      invoiceHashBase64,
       signedPropsHash,
       signatureBase64,
       certificateBody,
@@ -97,7 +71,6 @@ export async function createSalesReturnPipeline(
       serialNumber,
     );
 
-    /* ── 8. Build QR payload ── */
     const totals = calculateTotals(invoice.items, invoice.isTaxIncludedInPrice, invoice.discount);
     const publicKeyBytes = getPublicKeyBytes(certificateBase64);
     const certSigBytes = getCertificateSignatureBytes(certificateBase64);
@@ -108,22 +81,22 @@ export async function createSalesReturnPipeline(
       timestamp: signingTime,
       total: totals.totalWithTax.toFixed(2),
       vat: totals.totalTax.toFixed(2),
-      hash: invoiceHash.base64,
+      hash: invoiceHashBase64,
       signatureBase64: signatureBase64,
       publicKeyBytes,
       certSignatureBytes: certSigBytes,
     });
 
-    /* ── 9. Inject QR into XML ── */
-    const finalXml = injectSalesReturnQRData(xmlWithExtensions, qrBase64);
+    injectSalesReturnQRData(baseXmlDoc, qrBase64);
+    const finalXml = serializeXML(baseXmlDoc);
 
-    /* ── 10. Compute final hash → save as PIH for next invoice ── */
-    const finalHash = await generateInvoiceHash(finalXml);
-    await savePreviousInvoiceHash(finalHash.base64);
+    const finalCanonical = canonicalizeDOM(baseXmlDoc);
+    const finalHashBuf = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, finalCanonical, { encoding: Crypto.CryptoEncoding.BASE64 });
+    await savePreviousInvoiceHash(finalHashBuf);
 
     return {
       xml: finalXml,
-      hash: invoiceHash.base64,
+      hash: invoiceHashBase64,
       signature: signatureBase64,
       qrBase64,
       savedUri: undefined,

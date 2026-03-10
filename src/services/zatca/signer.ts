@@ -8,8 +8,10 @@
 /*       → internally SHA-256 hashes the input, then ECDSA signs        */
 /* ------------------------------------------------------------------ */
 
+import { Buffer } from 'buffer';
 import { ec as EC } from 'elliptic';
-import { base64ToBytes, bytesToBase64, extractECPrivateKey } from './certificate';
+import * as Crypto from 'expo-crypto';
+import { extractECPrivateKeyBytes } from './certificate';
 import { EC_CURVE } from './constants';
 
 // ZATCA mandates ECDSA with secp256k1
@@ -33,20 +35,22 @@ export async function signHash(
   hexHash: string,
   privateKeyBase64: string,
 ): Promise<{ derBase64: string; rawBytes: Uint8Array }> {
-  // Convert hex hash back to bytes (which is the actual SHA-256 result of the XML)
-  const hashBytes = new Uint8Array(
-    (hexHash.match(/.{2}/g) || []).map((byte) => parseInt(byte, 16)),
-  );
+  // Convert hex hash string into a UTF-8 Buffer to replicate Node.js `Buffer.from(hashHex, 'utf8')`
+  const hashBytes = Buffer.from(hexHash, 'utf8');
 
-  // ECDSA sign the raw SHA-256 hash bytes
-  const pkBytes = extractECPrivateKey(new TextDecoder().decode(base64ToBytes(privateKeyBase64)));
+  // ECDSA sign the raw string representation (we SHA-256 first internally to mirror SignData)
+  const pkBytes = extractECPrivateKeyBytes(privateKeyBase64);
   const key = ec.keyFromPrivate(Array.from(pkBytes));
 
-  const sig = key.sign(Array.from(hashBytes));
-  const derBytes = new Uint8Array(sig.toDER());
+  // Like Node: crypto.sign('sha256', dataToSign, { key })
+  // We hash the exact string with SHA-256 then ECDSA sign
+  const digest = await Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, hashBytes);
+
+  const sig = key.sign(Array.from(new Uint8Array(digest)));
+  const derBytes = Buffer.from(sig.toDER());
 
   return {
-    derBase64: bytesToBase64(derBytes),
-    rawBytes: derBytes,
+    derBase64: derBytes.toString('base64'),
+    rawBytes: new Uint8Array(derBytes),
   };
 }
