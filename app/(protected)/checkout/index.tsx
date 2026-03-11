@@ -1,27 +1,23 @@
 import {
-    clearCart,
-    removeFromCart,
-    selectCartItems,
-    selectTotal,
-    updateQuantity,
+  clearCart,
+  removeFromCart,
+  selectCartItems,
+  selectTotal,
+  updateQuantity,
 } from '@/src/features/cart/cartSlice';
 import { AddCustomerModal } from '@/src/features/customers/components/AddCustomerModal';
 import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
-import {
-    createInvoicePipeline,
-    saveInvoiceXML,
-    shareInvoiceXML,
-} from '@/src/services/zatca/invoicePipeline';
+import { saveInvoiceXML, shareInvoiceXML } from '@/src/services/zatca/invoicePipeline';
 import type { Invoice } from '@/src/services/zatca/types';
 import {
-    getPreviousInvoiceHash,
-    isTaxIncludedInPrice,
-    certificate as zatcaCert,
-    supplier as zatcaSupplier,
+  getPreviousInvoiceHash,
+  isTaxIncludedInPrice,
+  supplier as zatcaSupplier,
 } from '@/src/services/zatca/zatcaConfig';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
+import { InvoiceService } from '@/src/zatca/invoiceService';
 import { Ionicons } from '@expo/vector-icons';
 import { randomUUID } from 'expo-crypto';
 import { useRouter } from 'expo-router';
@@ -36,6 +32,7 @@ interface SelectedCustomer {
   name: string | null;
   phoneNo: string | null;
 }
+const invoiceService = new InvoiceService();
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -93,7 +90,7 @@ export default function CheckoutPage() {
       setCashAmount('');
       setCardAmount(total.toFixed(2));
     }
-  }, [selectedPaymentMethod]);
+  }, [selectedPaymentMethod, total]);
 
   const handleSelectCustomer = (customer: SelectedCustomer) => {
     setSelectedCustomer(customer);
@@ -133,18 +130,39 @@ export default function CheckoutPage() {
         })),
       };
 
-      const result = await createInvoicePipeline(
-        invoice,
-        zatcaCert.certificateBase64,
-        zatcaCert.privateKeyBase64,
+      const result = await invoiceService.generate(
+        {
+          sellerName: zatcaSupplier.registrationName,
+          sellerTaxId: zatcaSupplier.vatNumber,
+        },
+        {
+          number: invoice.invoiceNumber,
+          date: invoice.issueDate,
+          items: invoice.items.map((i) => ({
+            name: i.name,
+            qty: i.quantity,
+            price: i.price,
+          })),
+        },
       );
-      console.log('ZATCA Invoice Result generated successfully.', result.hash);
+      // const result = await createInvoicePipeline(
+      //   invoice,
+      //   zatcaCert.certificateBase64,
+      //   zatcaCert.privateKeyBase64,
+      // );
+      console.log('ZATCA Invoice Result generated successfully.', result.qrBase64);
 
       // Save XML to device (optional but recommended for ZATCA)
       const savedUri = await saveInvoiceXML(invoice.invoiceNumber, result.xml);
 
-      // Display the QR Code Modal
-      setZatcaResult({ ...result, savedUri });
+      setZatcaResult({
+        xml: result.xml,
+        hash: '',
+        signature: '',
+        qrBase64: result.qrBase64,
+        savedUri,
+      });
+
       setInvoiceData(invoice);
       setIsZatcaModalVisible(true);
 
@@ -170,6 +188,7 @@ export default function CheckoutPage() {
     dispatch(clearCart());
     router.replace('/');
   };
+  // Display the QR Code Modal
 
   return (
     <View className="flex-1 flex-row bg-gray-50 ">
