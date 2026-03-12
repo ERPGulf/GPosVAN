@@ -24,6 +24,7 @@ export function esc(value: string): string {
  * ==================================================================== */
 
 export function buildInvoiceXML(invoice: Invoice): string {
+  if (__DEV__) console.log('[ZATCA] buildInvoiceXML: building base XML...');
   const totals = calculateTotals(invoice.items, invoice.isTaxIncludedInPrice, invoice.discount);
 
   const f = (n: number) => n.toFixed(2);
@@ -112,6 +113,7 @@ export function buildInvoiceXML(invoice: Invoice): string {
 
   xml += `\n</Invoice>`;
 
+  if (__DEV__) console.log('[ZATCA] buildInvoiceXML: base XML complete.');
   return xml;
 }
 
@@ -272,6 +274,7 @@ export function buildInvoiceLines(invoice: Invoice): string {
     .join('');
 }
 export function injectQRData(xml: string, qrBase64: string): string {
+  if (__DEV__) console.log('[ZATCA] injectQRData: injecting QR base64...');
   return xml.replace('PLACEHOLDER_QR', qrBase64);
 }
 export function injectUBLExtensions(
@@ -285,6 +288,7 @@ export function injectUBLExtensions(
   issuerName: string,
   serialNumber: string,
 ): string {
+  if (__DEV__) console.log('[ZATCA] injectUBLExtensions: building and injecting extensions...');
   const dsSignature = buildDSSignature(
     invoiceHashBase64,
     signedPropsHash,
@@ -313,6 +317,7 @@ export function injectUBLExtensions(
   ext += `\n    </ext:UBLExtension>`;
   ext += `\n</ext:UBLExtensions>`;
 
+  if (__DEV__) console.log('[ZATCA] injectUBLExtensions: injection complete.');
   return xml.replace(/<Invoice[\s\S]*?>/, (match) => match + ext);
 }
 

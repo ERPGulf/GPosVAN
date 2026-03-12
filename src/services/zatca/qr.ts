@@ -28,6 +28,7 @@ export interface QRPayloadInput {
  *  - Tag 9: raw certificate signature bytes
  */
 export function buildQRPayload(data: QRPayloadInput): string {
+  if (__DEV__) console.log('[ZATCA] buildQRPayload: building Phase 2 QR...');
   const tags: Uint8Array[] = [
     encodeTLV(1, data.sellerName),
     encodeTLV(2, data.vatNumber),

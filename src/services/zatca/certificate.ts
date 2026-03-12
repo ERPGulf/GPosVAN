@@ -9,6 +9,7 @@
 import * as Crypto from 'expo-crypto';
 
 export async function getCertificateDigestValue(certBase64: string): Promise<string> {
+  if (__DEV__) console.log('[ZATCA] getCertificateDigestValue: calculating digest...');
   // C# flow: SHA256(cert.RawData) → hex → base64(UTF8(hex))
   // cert.RawData = raw DER bytes of the certificate
   const derBytes = decodeCertificate(certBase64);
@@ -42,6 +43,7 @@ export function getCleanCertBody(certBase64: string): string {
  * Example: "CN=TSZEINVOICE-SubCA-1, DC=extgazt, DC=gov, DC=local"
  */
 export function getCertificateIssuer(certBase64: string): string {
+  if (__DEV__) console.log('[ZATCA] getCertificateIssuer: extracting issuer DN...');
   const der = decodeCertificate(certBase64);
   const tbsCert = parseTBSCertificate(der);
   // ZATCA expects Reverse order for Issuer Name: DC=..., DC=..., OU=..., O=..., C=...
@@ -52,6 +54,7 @@ export function getCertificateIssuer(certBase64: string): string {
  * Extract the certificate serial number as a decimal string.
  */
 export function getSerialNumber(certBase64: string): string {
+  if (__DEV__) console.log('[ZATCA] getSerialNumber: extracting serial number...');
   const der = decodeCertificate(certBase64);
   const tbsCert = parseTBSCertificate(der);
   return tbsCert.serialNumber;

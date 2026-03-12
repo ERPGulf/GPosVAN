@@ -34,6 +34,8 @@ export async function signHash(
   hexHash: string,
   privateKeyBase64: string,
 ): Promise<{ derBase64: string; rawBytes: Uint8Array }> {
+  if (__DEV__) console.log('[ZATCA] signHash: hashing hex stream...');
+
   // Step 1+2: SHA-256 hash the hex hash string
   // (C#: Encoding.UTF8.GetBytes(hashHex) → SHA-256withECDSA internally hashes)
   // Using digestStringAsync to avoid Hermes TypedArray compatibility issues
@@ -50,11 +52,15 @@ export async function signHash(
   const pkBytes = extractECPrivateKey(new TextDecoder().decode(base64ToBytes(privateKeyBase64)));
   const key = ec.keyFromPrivate(Array.from(pkBytes));
 
+  if (__DEV__) console.log('[ZATCA] signHash: performing ECDSA signature (secp256k1)...');
   const sig = key.sign(Array.from(hashBytes));
   const derBytes = new Uint8Array(sig.toDER());
 
+  const derBase64 = bytesToBase64(derBytes);
+  if (__DEV__) console.log('[ZATCA] signHash: success.');
+
   return {
-    derBase64: bytesToBase64(derBytes),
+    derBase64,
     rawBytes: derBytes,
   };
 }

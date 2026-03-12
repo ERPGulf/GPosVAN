@@ -41,6 +41,7 @@ export function generateSimpleQrString(
   total: string,
   vatAmount: string,
 ): string {
+  if (__DEV__) console.log('[ZATCA] generateSimpleQrString: generating Phase 1 QR...');
   const tags: Uint8Array[] = [
     encodeTLV(1, sellerName),
     encodeTLV(2, vatNumber),

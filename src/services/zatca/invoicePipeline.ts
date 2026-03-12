@@ -53,14 +53,17 @@ export async function createInvoicePipeline(
   }
 
   try {
+    if (__DEV__) console.log('[ZATCA] Starting createInvoicePipeline for invoice:', invoice.invoiceNumber);
+
     /* ── 1. Build base XML ── */
     const baseXml = buildInvoiceXML(invoice);
+    if (__DEV__) console.log('[ZATCA] Base XML built.');
 
     /* ── 2. Hash the base XML ── */
     const invoiceHash = await generateInvoiceHash(baseXml);
     if (__DEV__) {
-      console.log('Invoice Hash (base64):', invoiceHash.base64);
-      console.log('Invoice Hash (hex):', invoiceHash.hex);
+      console.log('[ZATCA] Invoice Hash (base64):', invoiceHash.base64);
+      console.log('[ZATCA] Invoice Hash (hex):', invoiceHash.hex);
     }
 
     /* ── 3. Certificate info ── */
@@ -70,9 +73,7 @@ export async function createInvoicePipeline(
     const signingTime = `${invoice.issueDate}T${invoice.issueTime}`;
 
     if (__DEV__) {
-      console.log('Cert Digest:', certDigest);
-      console.log('Issuer Name:', issuerName);
-      console.log('Serial Number:', serialNumber);
+      console.log('[ZATCA] Cert metadata extracted:', { certDigest, issuerName, serialNumber });
     }
 
     /* ── 4. Signed properties hash ── */
@@ -82,11 +83,11 @@ export async function createInvoicePipeline(
       serialNumber,
       certDigest,
     );
-    if (__DEV__) console.log('Signed Props Hash:', signedPropsHash);
+    if (__DEV__) console.log('[ZATCA] Signed Props Hash:', signedPropsHash);
 
     /* ── 5. Sign the hex hash ── */
     const { derBase64: signatureBase64 } = await signHash(invoiceHash.hex, privateKeyBase64);
-    if (__DEV__) console.log('Signature (base64):', signatureBase64);
+    if (__DEV__) console.log('[ZATCA] Signature (base64) generated.');
 
     /* ── 6. Get clean certificate body for X509Certificate element ── */
     const certificateBody = getCleanCertBody(certificateBase64);
@@ -103,6 +104,7 @@ export async function createInvoicePipeline(
       issuerName,
       serialNumber,
     );
+    if (__DEV__) console.log('[ZATCA] UBL Extensions injected.');
 
     /* ── 8. Build QR payload ── */
     const totals = calculateTotals(invoice.items, invoice.isTaxIncludedInPrice, invoice.discount);
@@ -110,8 +112,7 @@ export async function createInvoicePipeline(
     const certSigBytes = getCertificateSignatureBytes(certificateBase64);
 
     if (__DEV__) {
-      console.log('PublicKey length:', publicKeyBytes.length);
-      console.log('CertSignature length:', certSigBytes.length);
+      console.log('[ZATCA] QR prerequisites ready (PublicKey, CertSignature).');
     }
 
     const qrBase64 = buildQRPayload({
@@ -125,13 +126,16 @@ export async function createInvoicePipeline(
       publicKeyBytes,
       certSignatureBytes: certSigBytes,
     });
+    if (__DEV__) console.log('[ZATCA] QR Payload (base64) built.');
 
     /* ── 9. Inject QR into XML ── */
     const finalXml = injectQRData(xmlWithExtensions, qrBase64);
+    if (__DEV__) console.log('[ZATCA] QR Data injected into XML.');
 
     /* ── 10. Compute final hash → save as PIH for next invoice ── */
     const finalHash = await generateInvoiceHash(finalXml);
     await savePreviousInvoiceHash(finalHash.base64);
+    if (__DEV__) console.log('[ZATCA] Final hash saved as PIH. Pipeline complete.');
 
     return {
       xml: finalXml,
@@ -141,6 +145,7 @@ export async function createInvoicePipeline(
       savedUri: undefined,
     };
   } catch (error) {
+    if (__DEV__) console.error('[ZATCA] Pipeline failed:', error);
     if (error instanceof ZatcaError) throw error;
     throw new ZatcaError(
       'pipeline',

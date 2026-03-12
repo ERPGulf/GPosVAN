@@ -58,17 +58,28 @@ export async function createSalesReturnPipeline(
   }
 
   try {
+    if (__DEV__) console.log('[ZATCA] Starting createSalesReturnPipeline for invoice:', invoice.invoiceNumber);
+
     /* ── 1. Build base XML ── */
     const baseXml = buildSalesReturnXML(invoice);
+    if (__DEV__) console.log('[ZATCA] Sales Return Base XML built.');
 
     /* ── 2. Hash the base XML ── */
     const invoiceHash = await generateInvoiceHash(baseXml);
+    if (__DEV__) {
+      console.log('[ZATCA] Sales Return Hash (base64):', invoiceHash.base64);
+      console.log('[ZATCA] Sales Return Hash (hex):', invoiceHash.hex);
+    }
 
     /* ── 3. Certificate info ── */
     const certDigest = await getCertificateDigestValue(certificateBase64);
     const issuerName = getCertificateIssuer(certificateBase64);
     const serialNumber = getSerialNumber(certificateBase64);
     const signingTime = `${invoice.issueDate}T${invoice.issueTime}`;
+
+    if (__DEV__) {
+      console.log('[ZATCA] Cert metadata extracted for Sales Return:', { certDigest, issuerName, serialNumber });
+    }
 
     /* ── 4. Signed properties hash ── */
     const signedPropsHash = await generateSignedPropertiesHash(
@@ -77,9 +88,11 @@ export async function createSalesReturnPipeline(
       serialNumber,
       certDigest,
     );
+    if (__DEV__) console.log('[ZATCA] Sales Return Signed Props Hash:', signedPropsHash);
 
     /* ── 5. Sign the hex hash ── */
     const { derBase64: signatureBase64 } = await signHash(invoiceHash.hex, privateKeyBase64);
+    if (__DEV__) console.log('[ZATCA] Sales Return Signature (base64) generated.');
 
     /* ── 6. Get clean certificate body ── */
     const certificateBody = getCleanCertBody(certificateBase64);
@@ -96,11 +109,16 @@ export async function createSalesReturnPipeline(
       issuerName,
       serialNumber,
     );
+    if (__DEV__) console.log('[ZATCA] Sales Return UBL Extensions injected.');
 
     /* ── 8. Build QR payload ── */
     const totals = calculateTotals(invoice.items, invoice.isTaxIncludedInPrice, invoice.discount);
     const publicKeyBytes = getPublicKeyBytes(certificateBase64);
     const certSigBytes = getCertificateSignatureBytes(certificateBase64);
+
+    if (__DEV__) {
+      console.log('[ZATCA] Sales Return QR prerequisites ready.');
+    }
 
     const qrBase64 = buildQRPayload({
       sellerName: invoice.supplier.registrationName,
@@ -113,13 +131,16 @@ export async function createSalesReturnPipeline(
       publicKeyBytes,
       certSignatureBytes: certSigBytes,
     });
+    if (__DEV__) console.log('[ZATCA] Sales Return QR Payload built.');
 
     /* ── 9. Inject QR into XML ── */
     const finalXml = injectSalesReturnQRData(xmlWithExtensions, qrBase64);
+    if (__DEV__) console.log('[ZATCA] Sales Return QR Data injected.');
 
     /* ── 10. Compute final hash → save as PIH for next invoice ── */
     const finalHash = await generateInvoiceHash(finalXml);
     await savePreviousInvoiceHash(finalHash.base64);
+    if (__DEV__) console.log('[ZATCA] Sales Return Final hash saved as PIH. Pipeline complete.');
 
     return {
       xml: finalXml,
@@ -129,6 +150,7 @@ export async function createSalesReturnPipeline(
       savedUri: undefined,
     };
   } catch (error) {
+    if (__DEV__) console.error('[ZATCA] Sales Return pipeline failed:', error);
     if (error instanceof ZatcaError) throw error;
     throw new ZatcaError(
       'pipeline',

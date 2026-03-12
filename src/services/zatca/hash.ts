@@ -158,11 +158,15 @@ function escapeC14nAttr(value: string): string {
  *   SHA256(canonicalXml) → { hex, base64 }
  */
 export async function generateInvoiceHash(xml: string) {
+  if (__DEV__) console.log('[ZATCA] generateInvoiceHash: starting...');
+
   // STEP 1: remove signature/QR/extension nodes
   const stripped = removeSignatureNodes(xml);
+  if (__DEV__) console.log('[ZATCA] generateInvoiceHash: nodes stripped.');
 
   // STEP 2: canonicalize (C14N 1.1)
   const canonicalXml = canonicalize(stripped);
+  if (__DEV__) console.log('[ZATCA] generateInvoiceHash: C14N 1.1 canonicalization complete.');
 
   // STEP 3: hash — base64
   const base64Hash = await Crypto.digestStringAsync(
@@ -178,6 +182,7 @@ export async function generateInvoiceHash(xml: string) {
     { encoding: Crypto.CryptoEncoding.HEX },
   );
 
+  if (__DEV__) console.log('[ZATCA] generateInvoiceHash: complete.');
   return {
     canonicalXml,
     base64: base64Hash,
@@ -206,8 +211,11 @@ export async function generateSignedPropertiesHash(
   serialNumber: string,
   certificateDigest: string,
 ) {
+  if (__DEV__) console.log('[ZATCA] generateSignedPropertiesHash: building template...');
+
   // Build template matching C# GenerateSignedPropertiesHash exactly
   let xml = '';
+  /* ... build template code ... */
   xml +=
     '<xades:SignedProperties xmlns:xades="http://uri.etsi.org/01903/v1.3.2#" Id="xadesSignedProperties">\n';
   xml += '                                    <xades:SignedSignatureProperties>\n';
@@ -245,5 +253,6 @@ export async function generateSignedPropertiesHash(
     encoding: Crypto.CryptoEncoding.HEX,
   });
 
+  if (__DEV__) console.log('[ZATCA] generateSignedPropertiesHash: hashing result...');
   return bytesToBase64(new TextEncoder().encode(hexHash));
 }
