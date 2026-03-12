@@ -147,7 +147,8 @@ export function injectSalesReturnUBLExtensions(
   issuerName: string,
   serialNumber: string,
 ): string {
-  if (__DEV__) console.log('[ZATCA] injectSalesReturnUBLExtensions: building and injecting extensions...');
+  if (__DEV__)
+    console.log('[ZATCA] injectSalesReturnUBLExtensions: building and injecting extensions...');
   const dsSignature = buildDSSignature(
     invoiceHashBase64,
     signedPropsHash,

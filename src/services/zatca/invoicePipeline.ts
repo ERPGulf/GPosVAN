@@ -25,7 +25,7 @@ import { savePreviousInvoiceHash } from './zatcaConfig';
 
 /**
  * Full invoice creation pipeline — matches C# CreateInvoice flow:
- *
+ * create pem using private public and certficate
  * 1. Build base XML
  * 2. Hash base XML → { hex, base64 }
  * 3. Get certificate info (digest, issuer, serial)
@@ -53,7 +53,8 @@ export async function createInvoicePipeline(
   }
 
   try {
-    if (__DEV__) console.log('[ZATCA] Starting createInvoicePipeline for invoice:', invoice.invoiceNumber);
+    if (__DEV__)
+      console.log('[ZATCA] Starting createInvoicePipeline for invoice:', invoice.invoiceNumber);
 
     /* ── 1. Build base XML ── */
     const baseXml = buildInvoiceXML(invoice);
