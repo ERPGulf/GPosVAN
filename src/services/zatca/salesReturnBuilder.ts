@@ -9,14 +9,14 @@ import { INVOICE_SUBTYPE, NS } from './constants';
 import { calculateTotals } from './totals';
 import type { SalesReturnInvoice } from './types';
 import {
-    buildAllowanceCharge,
-    buildCustomerParty,
-    buildDSSignature,
-    buildInvoiceLines,
-    buildLegalMonetaryTotal,
-    buildSupplierParty,
-    buildTaxTotalWithSubtotal,
-    esc,
+  buildAllowanceCharge,
+  buildCustomerParty,
+  buildDSSignature,
+  buildInvoiceLines,
+  buildLegalMonetaryTotal,
+  buildSupplierParty,
+  buildTaxTotalWithSubtotal,
+  esc,
 } from './XMLHelper';
 
 /* ====================================================================

@@ -1,25 +1,25 @@
 import {
-    clearCart,
-    removeFromCart,
-    selectCartItems,
-    selectTotal,
-    updateQuantity,
+  clearCart,
+  removeFromCart,
+  selectCartItems,
+  selectTotal,
+  updateQuantity,
 } from '@/src/features/cart/cartSlice';
 import { AddCustomerModal } from '@/src/features/customers/components/AddCustomerModal';
 import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
 import {
-    createInvoicePipeline,
-    saveInvoiceXML,
-    shareInvoiceXML,
+  createInvoicePipeline,
+  saveInvoiceXML,
+  shareInvoiceXML,
 } from '@/src/services/zatca/invoicePipeline';
 import type { Invoice } from '@/src/services/zatca/types';
 import {
-    getPreviousInvoiceHash,
-    isTaxIncludedInPrice,
-    certificate as zatcaCert,
-    supplier as zatcaSupplier,
+  getPreviousInvoiceHash,
+  isTaxIncludedInPrice,
+  certificate as zatcaCert,
+  supplier as zatcaSupplier,
 } from '@/src/services/zatca/zatcaConfig';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';

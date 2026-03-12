@@ -7,12 +7,12 @@ import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 
 import {
-    getCertificateDigestValue,
-    getCertificateIssuer,
-    getCertificateSignatureBytes,
-    getCleanCertBody,
-    getPublicKeyBytes,
-    getSerialNumber,
+  getCertificateDigestValue,
+  getCertificateIssuer,
+  getCertificateSignatureBytes,
+  getCleanCertBody,
+  getPublicKeyBytes,
+  getSerialNumber,
 } from './certificate';
 import { ZatcaError } from './errors';
 import { generateInvoiceHash, generateSignedPropertiesHash } from './hash';
