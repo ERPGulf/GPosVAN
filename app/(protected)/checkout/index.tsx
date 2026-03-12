@@ -10,14 +10,12 @@ import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
 import { saveInvoiceXML, shareInvoiceXML } from '@/src/services/zatca_deprecated/invoicePipeline';
-import type { Invoice } from '@/src/services/zatca_deprecated/types';
-import {
-  getPreviousInvoiceHash,
-  isTaxIncludedInPrice,
-  supplier as zatcaSupplier,
-} from '@/src/services/zatca_deprecated/zatcaConfig';
+
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
-import { InvoiceService } from '@/src/zatca/invoiceService';
+import { PIHService } from '@/src/zatca/crypto/pih.service';
+import { createInvoicePipeline } from '@/src/zatca/pipeline/invoicePipeline';
+import { CertificateInfo, InvoiceInput } from '@/src/zatca/types';
+import zatcaConfig from '@/src/zatca/zatcaConfig';
 import { Ionicons } from '@expo/vector-icons';
 import { randomUUID } from 'expo-crypto';
 import { useRouter } from 'expo-router';
@@ -32,8 +30,47 @@ interface SelectedCustomer {
   name: string | null;
   phoneNo: string | null;
 }
-const invoiceService = new InvoiceService();
+function base64ToBytes(base64: string): Uint8Array {
+  if (!base64) throw new Error('Empty base64 input');
 
+  let clean = base64.trim();
+
+  // remove PEM headers
+  clean = clean.replace(/-----BEGIN [^-]+-----/g, '').replace(/-----END [^-]+-----/g, '');
+
+  // remove whitespace and newlines
+  clean = clean.replace(/\s+/g, '');
+
+  // remove non-base64 characters
+  clean = clean.replace(/[^A-Za-z0-9+/=]/g, '');
+
+  const binary = atob(clean);
+
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  return bytes;
+}
+
+export const certificate: CertificateInfo = {
+  certificate: zatcaConfig.zatca.certificate,
+
+  // Temporary placeholders until certificate parsing is implemented
+  issuer: 'CN=ZATCA',
+
+  serialNumber: '1',
+
+  certDigest: '',
+
+  publicKey: base64ToBytes(zatcaConfig.zatca.public_key),
+
+  signatureKey: base64ToBytes(zatcaConfig.zatca.public_key),
+};
+
+export const privateKey = zatcaConfig.zatca.private_key;
 export default function CheckoutPage() {
   const router = useRouter();
   const dispatch = useAppDispatch();
@@ -61,7 +98,7 @@ export default function CheckoutPage() {
     qrBase64: string;
     savedUri?: string;
   } | null>(null);
-  const [invoiceData, setInvoiceData] = useState<Invoice | null>(null);
+  const [invoiceData, setInvoiceData] = useState<InvoiceInput | null>(null);
 
   const filteredCustomers = useMemo(() => {
     if (!customers) return [];
@@ -100,76 +137,117 @@ export default function CheckoutPage() {
 
   const handleCompletePayment = async () => {
     if (isProcessing) return;
+
     setIsProcessing(true);
 
     try {
       const now = new Date();
-      const previousHash = await getPreviousInvoiceHash();
 
-      const invoice: Invoice = {
-        uuid: randomUUID(),
-        invoiceNumber: `INV-${Date.now()}`,
-        issueDate: now.toISOString().split('T')[0],
-        issueTime: now.toTimeString().split(' ')[0],
-        timestamp: now.toISOString(),
-        supplier: zatcaSupplier,
-        customer: {
-          registrationName: selectedCustomer?.name ?? 'Walk-in Customer',
+      const previousHash = (await PIHService.getPreviousHash()) ?? '0';
+
+      /*
+    -------------------------
+    Calculate totals
+    -------------------------
+    */
+
+      const totals = cartItems.reduce(
+        (acc, item) => {
+          const price = item.product.uomPrice ?? item.product.price ?? 0;
+
+          const lineTotal = item.quantity * price;
+
+          const vatRate = (item.product.taxPercentage ?? 15) / 100;
+
+          const vatAmount = lineTotal * vatRate;
+
+          acc.totalExclVAT += lineTotal;
+          acc.totalVAT += vatAmount;
+
+          return acc;
         },
+        { totalExclVAT: 0, totalVAT: 0 },
+      );
+
+      const totalExclVAT = Number(totals.totalExclVAT.toFixed(2));
+      const totalVAT = Number(totals.totalVAT.toFixed(2));
+      const totalInclVAT = Number((totalExclVAT + totalVAT).toFixed(2));
+
+      /*
+    -------------------------
+    Build invoice
+    -------------------------
+    */
+
+      const invoice: InvoiceInput = {
+        uuid: randomUUID(),
+
+        number: `INV-${Date.now()}`,
+
+        date: now.toISOString().split('T')[0],
+
+        time: now.toTimeString().split(' ')[0],
+
+        timestamp: now.toISOString(),
+
         previousInvoiceHash: previousHash,
-        currency: 'SAR',
-        discount: 0,
-        isTaxIncludedInPrice,
-        invoiceSubtype: invoiceType === 'B2B' ? '0100000' : '0200000',
+
+        supplier: {
+          registrationName: zatcaConfig.zatca.company_name,
+
+          vatNumber: zatcaConfig.zatca.tax_id,
+        },
+
         items: cartItems.map((ci) => ({
           name: ci.product.name ?? 'Unknown Item',
+
           quantity: ci.quantity,
+
           price: ci.product.uomPrice ?? ci.product.price ?? 0,
-          taxPercentage: ci.product.taxPercentage ?? 15,
-          unitOfMeasure: ci.product.uom ?? 'PCE',
+
+          vatRate: ci.product.taxPercentage ?? 15,
         })),
+
+        totals: {
+          totalExclVAT,
+          totalVAT,
+          totalInclVAT,
+        },
       };
 
-      const result = await invoiceService.generate(
-        {
-          sellerName: zatcaSupplier.registrationName,
-          sellerTaxId: zatcaSupplier.vatNumber,
-        },
-        {
-          number: invoice.invoiceNumber,
-          date: invoice.issueDate,
-          items: invoice.items.map((i) => ({
-            name: i.name,
-            qty: i.quantity,
-            price: i.price,
-          })),
-        },
-      );
-      // const result = await createInvoicePipeline(
-      //   invoice,
-      //   zatcaCert.certificateBase64,
-      //   zatcaCert.privateKeyBase64,
-      // );
-      console.log('ZATCA Invoice Result generated successfully.', result.qrBase64);
+      /*
+    -------------------------
+    Generate ZATCA invoice
+    -------------------------
+    */
 
-      // Save XML to device (optional but recommended for ZATCA)
-      const savedUri = await saveInvoiceXML(invoice.invoiceNumber, result.xml);
+      const result = await createInvoicePipeline(invoice, certificate, privateKey);
+
+      console.log('ZATCA invoice generated:', result.hash);
+
+      /*
+    -------------------------
+    Save XML locally
+    -------------------------
+    */
+
+      const savedUri = await saveInvoiceXML(invoice.number, result.xml);
 
       setZatcaResult({
         xml: result.xml,
-        hash: '',
-        signature: '',
+        hash: result.hash,
+        signature: result.signature,
         qrBase64: result.qrBase64,
         savedUri,
       });
 
       setInvoiceData(invoice);
-      setIsZatcaModalVisible(true);
 
-      // Moved dispatch(clearCart()) and router.replace('/') to the Modal close handler
+      setIsZatcaModalVisible(true);
     } catch (error) {
       console.error('Invoice pipeline error:', error);
-      Alert.alert('Error', 'Failed to generate invoice. Please try again.');
+
+      Alert.alert('Error', 'Failed to generate invoice.');
     } finally {
       setIsProcessing(false);
     }
@@ -509,9 +587,7 @@ export default function CheckoutPage() {
             <View className="p-6 items-center">
               <View className="mb-6 items-center">
                 <Text className="text-gray-500 mb-1">Invoice Number</Text>
-                <Text className="text-lg font-bold text-gray-800">
-                  {invoiceData?.invoiceNumber}
-                </Text>
+                <Text className="text-lg font-bold text-gray-800">{invoiceData?.number}</Text>
               </View>
 
               {zatcaResult?.qrBase64 ? (

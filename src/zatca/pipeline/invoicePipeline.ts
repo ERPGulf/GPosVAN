@@ -43,7 +43,7 @@ export async function createInvoicePipeline(
       sellerVat: invoice.supplier.vatNumber,
 
       previousInvoiceHash: previousHash ?? '',
-
+      invoiceCounter: invoice.number.replace(/\D/g, ''),
       totalExclVAT: totals.totalExclVAT.toFixed(2),
       totalVAT: totals.totalVAT.toFixed(2),
       totalInclVAT: totals.totalInclVAT.toFixed(2),

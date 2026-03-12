@@ -1,0 +1,69 @@
+const zatcaConfig = {
+  discount_field: 0,
+  prefix_included_or_not: 0,
+  no_of_prefix_character: 3,
+  prefix: 'ITM',
+
+  item_code_total_digits: 6,
+  item_code_starting_position: 4,
+
+  weight_starting_position: 10,
+  weight_total_digitsexcluding_decimal: 6,
+  no_of_decimal_in_weights: 3,
+
+  price_included_in_barcode_or_not: 0,
+  price_starting_position: 20,
+  price_total_digitsexcluding_decimals: 6,
+  no_of_decimal_in_price: 3,
+
+  inclusive: 0,
+  tax_percentage: 0,
+
+  phase: 'Phase-2',
+
+  company_name_in_arabic: null,
+
+  zatca: {
+    company_name: 'erpgulf',
+
+    tax_id: '399999999900003',
+
+    company_registration_no: '1234567',
+
+    Abbr: 'e',
+
+    certificate:
+      'TUlJRDNqQ0NBNFNnQXdJQkFnSVRFUUFBT0FQRjkwQWpzL3hjWHdBQkFBQTRBekFLQmdncWhrak9QUVFEQWpCaU1SVXdFd1lLQ1pJbWlaUHlMR1FCR1JZRmJHOWpZV3d4RXpBUkJnb0praWFKay9Jc1pBRVpGZ05uYjNZeEZ6QVZCZ29Ka2lhSmsvSXNaQUVaRmdkbGVIUm5ZWHAwTVJzd0dRWURWUVFERXhKUVVscEZTVTVXVDBsRFJWTkRRVFF0UTBFd0hoY05NalF3TVRFeE1Ea3hPVE13V2hjTk1qa3dNVEE1TURreE9UTXdXakIxTVFzd0NRWURWUVFHRXdKVFFURW1NQ1FHQTFVRUNoTWRUV0Y0YVcxMWJTQlRjR1ZsWkNCVVpXTm9JRk4xY0hCc2VTQk1WRVF4RmpBVUJnTlZCQXNURFZKcGVXRmthQ0JDY21GdVkyZ3hKakFrQmdOVkJBTVRIVlJUVkMwNE9EWTBNekV4TkRVdE16azVPVGs1T1RrNU9UQXdNREF6TUZZd0VBWUhLb1pJemowQ0FRWUZLNEVFQUFvRFFnQUVvV0NLYTBTYTlGSUVyVE92MHVBa0MxVklLWHhVOW5QcHgydmxmNHloTWVqeThjMDJYSmJsRHE3dFB5ZG84bXEwYWhPTW1Obzhnd25pN1h0MUtUOVVlS09DQWdjd2dnSURNSUd0QmdOVkhSRUVnYVV3Z2FLa2daOHdnWnd4T3pBNUJnTlZCQVFNTWpFdFZGTlVmREl0VkZOVWZETXRaV1F5TW1ZeFpEZ3RaVFpoTWkweE1URTRMVGxpTlRndFpEbGhPR1l4TVdVME5EVm1NUjh3SFFZS0NaSW1pWlB5TEdRQkFRd1BNems1T1RrNU9UazVPVEF3TURBek1RMHdDd1lEVlFRTURBUXhNVEF3TVJFd0R3WURWUVFhREFoU1VsSkVNamt5T1RFYU1CZ0dBMVVFRHd3UlUzVndjR3g1SUdGamRHbDJhWFJwWlhNd0hRWURWUjBPQkJZRUZFWCtZdm1tdG5Zb0RmOUJHYktvN29jVEtZSzFNQjhHQTFVZEl3UVlNQmFBRkp2S3FxTHRtcXdza0lGelZ2cFAyUHhUKzlObk1Ic0dDQ3NHQVFVRkJ3RUJCRzh3YlRCckJnZ3JCZ0VGQlFjd0FvWmZhSFIwY0RvdkwyRnBZVFF1ZW1GMFkyRXVaMjkyTG5OaEwwTmxjblJGYm5KdmJHd3ZVRkphUlVsdWRtOXBZMlZUUTBFMExtVjRkR2RoZW5RdVoyOTJMbXh2WTJGc1gxQlNXa1ZKVGxaUFNVTkZVME5CTkMxRFFTZ3hLUzVqY25Rd0RnWURWUjBQQVFIL0JBUURBZ2VBTUR3R0NTc0dBUVFCZ2pjVkJ3UXZNQzBHSlNzR0FRUUJnamNWQ0lHR3FCMkUwUHNTaHUyZEpJZk8reG5Ud0ZWbWgvcWxaWVhaaEQ0Q0FXUUNBUkl3SFFZRFZSMGxCQll3RkFZSUt3WUJCUVVIQXdNR0NDc0dBUVVGQndNQ01DY0dDU3NHQVFRQmdqY1ZDZ1FhTUJnd0NnWUlLd1lCQlFVSEF3TXdDZ1lJS3dZQkJRVUhBd0l3Q2dZSUtvWkl6ajBFQXdJRFNBQXdSUUloQUxFL2ljaG1uV1hDVUtVYmNhM3ljaThvcXdhTHZGZEhWalFydmVJOXVxQWJBaUE5aEM0TThqZ01CQURQU3ptZDJ1aVBKQTZnS1IzTEUwM1U3NWVxYkMvclhBPT0=',
+
+    private_key:
+      'LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0tCk1IUUNBUUVFSU90OGhuM1NpY0FLR2JlTnJOcS81bE5sUWpCajBMbmF1NStCY1JRLzM2M2tvQWNHQlN1QkJBQUsKb1VRRFFnQUU0R1RsOXhaQTFob0hQZ25WdjRKWVk5a3l2WGM2Z3JpQkduVXFydno0NXVINVRveHJUWGV6elBzegpncTZ1eFRrNi9PQkhEWEJQaTRZdlBySzU5NEJmY1E9PQotLS0tLUVORCBFQyBQUklWQVRFIEtFWS0tLS0tCg==',
+
+    public_key:
+      'LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZZd0VBWUhLb1pJemowQ0FRWUZLNEVFQUFvRFFnQUVvV0NLYTBTYTlGSUVyVE92MHVBa0MxVklLWHhVOW5QcAp4MnZsZjR5aE1lank4YzAyWEpibERxN3RQeWRvOG1xMGFoT01tTm84Z3duaTdYdDFLVDlVZUE9PQotLS0tLUVORCBQVUJMSUMgS0VZLS0tLS0K',
+
+    pih: 'ZGpZN64FvMV7WJqMSJyoug0Du6FSZablnhJtIgnHBuo=',
+
+    address: {
+      address_line1: null,
+      city: null,
+      county: null,
+      state: null,
+      pincode: null,
+      building_number: null,
+    },
+  },
+
+  cardpay_settings: {
+    secret_key: null,
+    api_key: null,
+    merchant_id: null,
+    connection_type: 'IP',
+    company: 'GEIDEA',
+  },
+
+  branch_details: {
+    card_machine: false,
+  },
+};
+
+export default zatcaConfig;

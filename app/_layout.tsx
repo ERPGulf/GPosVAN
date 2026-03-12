@@ -19,6 +19,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import './global.css';
+import { fetchPosSettings } from '@/src/services/api/postSettings.service';
 
 global.Buffer = Buffer;
 const queryClient = new QueryClient();

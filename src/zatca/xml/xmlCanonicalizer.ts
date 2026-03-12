@@ -1,5 +1,4 @@
-import { DOMParser } from '@xmldom/xmldom';
-import { C14nCanonicalization } from 'xml-crypto';
+import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 
 export function canonicalizeXML(xml: string): string {
   if (!xml || typeof xml !== 'string') {
@@ -21,16 +20,20 @@ export function canonicalizeXML(xml: string): string {
 
     const doc = parser.parseFromString(xml, 'application/xml');
 
-    if (!doc?.documentElement) {
+    if (!doc || !doc.documentElement) {
       throw new Error('Failed to parse XML document');
     }
 
-    const canonicalizer = new C14nCanonicalization();
+    const serializer = new XMLSerializer();
 
-    const canonicalBuffer = (canonicalizer as any).process(doc.documentElement);
+    let canonicalXML = serializer.serializeToString(doc);
 
-    let canonicalXML = canonicalBuffer.toString('utf8');
+    // ZATCA normalization
+    canonicalXML = canonicalXML.replace(/\r/g, '');
+    canonicalXML = canonicalXML.replace(/\n/g, '');
+    canonicalXML = canonicalXML.replace(/\t/g, '');
 
+    // remove CR entities
     canonicalXML = canonicalXML.replace(/&#xD;/g, '');
 
     if (!canonicalXML.includes('<Invoice')) {

@@ -28,20 +28,21 @@ export class XMLHelper {
     };
 
     /*
-    --------------------------------------------------
-    UBL Extensions (signature placeholder)
-    --------------------------------------------------
+    --------------------------------
+    UBL Extensions
+    --------------------------------
     */
 
     const ext = append(root, 'ext:UBLExtensions');
     const extChild = append(ext, 'ext:UBLExtension');
     const extContent = append(extChild, 'ext:ExtensionContent');
+
     extContent.appendChild(doc.createTextNode('SIGNATURE_PLACEHOLDER'));
 
     /*
-    --------------------------------------------------
-    Basic invoice metadata
-    --------------------------------------------------
+    --------------------------------
+    Basic Metadata
+    --------------------------------
     */
 
     append(root, 'cbc:ProfileID', 'reporting:1.0');
@@ -57,16 +58,30 @@ export class XMLHelper {
     append(root, 'cbc:TaxCurrencyCode', 'SAR');
 
     /*
-    --------------------------------------------------
-    AdditionalDocumentReference → PIH
-    --------------------------------------------------
+    --------------------------------
+    Invoice Counter (ICV)
+    --------------------------------
+    */
+
+    if (data.invoiceCounter) {
+      const icv = append(root, 'cac:AdditionalDocumentReference');
+      append(icv, 'cbc:ID', 'ICV');
+      append(icv, 'cbc:UUID', data.invoiceCounter);
+    }
+
+    /*
+    --------------------------------
+    Previous Invoice Hash (PIH)
+    --------------------------------
     */
 
     if (data.previousInvoiceHash) {
       const pih = append(root, 'cac:AdditionalDocumentReference');
+
       append(pih, 'cbc:ID', 'PIH');
 
       const attachment = append(pih, 'cac:Attachment');
+
       const embedded = append(
         attachment,
         'cbc:EmbeddedDocumentBinaryObject',
@@ -77,9 +92,9 @@ export class XMLHelper {
     }
 
     /*
-    --------------------------------------------------
+    --------------------------------
     Supplier
-    --------------------------------------------------
+    --------------------------------
     */
 
     const supplier = append(root, 'cac:AccountingSupplierParty');
@@ -95,36 +110,40 @@ export class XMLHelper {
     append(scheme, 'cbc:ID', 'VAT');
 
     /*
-    --------------------------------------------------
-    Delivery + Payment
-    --------------------------------------------------
+    --------------------------------
+    Delivery
+    --------------------------------
     */
 
     const delivery = append(root, 'cac:Delivery');
     append(delivery, 'cbc:ActualDeliveryDate', data.invoiceDate);
 
+    /*
+    --------------------------------
+    Payment
+    --------------------------------
+    */
+
     const payment = append(root, 'cac:PaymentMeans');
     append(payment, 'cbc:PaymentMeansCode', '30');
 
     /*
-    --------------------------------------------------
+    --------------------------------
     TaxTotal
-    --------------------------------------------------
+    --------------------------------
     */
 
     const taxTotal = append(root, 'cac:TaxTotal');
-    const taxAmount = append(taxTotal, 'cbc:TaxAmount', data.totalVAT);
 
+    const taxAmount = append(taxTotal, 'cbc:TaxAmount', data.totalVAT);
     taxAmount.setAttribute('currencyID', 'SAR');
 
     const subtotal = append(taxTotal, 'cac:TaxSubtotal');
 
     const taxable = append(subtotal, 'cbc:TaxableAmount', data.totalExclVAT);
-
     taxable.setAttribute('currencyID', 'SAR');
 
     const subTax = append(subtotal, 'cbc:TaxAmount', data.totalVAT);
-
     subTax.setAttribute('currencyID', 'SAR');
 
     const category = append(subtotal, 'cac:TaxCategory');
@@ -135,9 +154,9 @@ export class XMLHelper {
     append(scheme2, 'cbc:ID', 'VAT');
 
     /*
-    --------------------------------------------------
+    --------------------------------
     LegalMonetaryTotal
-    --------------------------------------------------
+    --------------------------------
     */
 
     const monetary = append(root, 'cac:LegalMonetaryTotal');
@@ -148,16 +167,31 @@ export class XMLHelper {
     const incl = append(monetary, 'cbc:TaxInclusiveAmount', data.totalInclVAT);
     incl.setAttribute('currencyID', 'SAR');
 
+    const payable = append(monetary, 'cbc:PayableAmount', data.totalInclVAT);
+    payable.setAttribute('currencyID', 'SAR');
+
     /*
-    --------------------------------------------------
-    QR placeholder
-    --------------------------------------------------
+    --------------------------------
+    Invoice Lines
+    --------------------------------
+    */
+
+    if (data.items && data.items.length) {
+      this.createInvoiceLines(doc, root, data.items);
+    }
+
+    /*
+    --------------------------------
+    QR Placeholder
+    --------------------------------
     */
 
     const qr = append(root, 'cac:AdditionalDocumentReference');
+
     append(qr, 'cbc:ID', 'QR');
 
     const attach = append(qr, 'cac:Attachment');
+
     const qrValue = append(attach, 'cbc:EmbeddedDocumentBinaryObject', 'QR_PLACEHOLDER');
 
     qrValue.setAttribute('mimeCode', 'text/plain');
@@ -166,9 +200,9 @@ export class XMLHelper {
   }
 
   /*
-  --------------------------------------------------
+  --------------------------------
   Inject QR
-  --------------------------------------------------
+  --------------------------------
   */
 
   static injectQR(xml: string, qrBase64: string) {
@@ -176,9 +210,9 @@ export class XMLHelper {
   }
 
   /*
-  --------------------------------------------------
+  --------------------------------
   Inject Signature
-  --------------------------------------------------
+  --------------------------------
   */
 
   static injectSignature(xml: string, signatureBlock: string) {
@@ -186,15 +220,15 @@ export class XMLHelper {
   }
 
   /*
-  --------------------------------------------------
-  Remove tags before hashing
-  --------------------------------------------------
+  --------------------------------
+  Remove nodes before hashing
+  --------------------------------
   */
 
   static removeTagsForHash(xml: string) {
     const doc = new DOMParser().parseFromString(xml);
 
-    const remove = (tag: string) => {
+    const removeNodes = (tag: string) => {
       const nodes = doc.getElementsByTagName(tag);
 
       for (let i = nodes.length - 1; i >= 0; i--) {
@@ -202,13 +236,27 @@ export class XMLHelper {
       }
     };
 
-    remove('ext:UBLExtensions');
-    remove('cac:Signature');
+    removeNodes('ext:UBLExtensions');
+    removeNodes('cac:Signature');
+
+    const refs = doc.getElementsByTagName('cac:AdditionalDocumentReference');
+
+    for (let i = refs.length - 1; i >= 0; i--) {
+      const id = refs[i].getElementsByTagName('cbc:ID')[0]?.textContent;
+
+      if (id === 'QR') {
+        refs[i].parentNode?.removeChild(refs[i]);
+      }
+    }
 
     return new XMLSerializer().serializeToString(doc);
   }
 
-  // invoice Lines
+  /*
+  --------------------------------
+  Invoice Lines
+  --------------------------------
+  */
 
   private static createInvoiceLines(doc: Document, root: Element, items: any[]) {
     const append = (parent: Element, tag: string, text?: string) => {
@@ -219,7 +267,7 @@ export class XMLHelper {
     };
 
     items.forEach((item, index) => {
-      const vatRate = item.vatRate ?? 0.15;
+      const vatRate = (item.vatRate ?? 15) / 100;
 
       const lineTotal = item.quantity * item.price;
 
@@ -237,31 +285,15 @@ export class XMLHelper {
 
       extensionAmount.setAttribute('currencyID', 'SAR');
 
-      /*
-    -------------------------
-    TaxTotal
-    -------------------------
-    */
-
       const taxTotal = append(invoiceLine, 'cac:TaxTotal');
 
       const taxAmount = append(taxTotal, 'cbc:TaxAmount', vatAmount.toFixed(2));
 
       taxAmount.setAttribute('currencyID', 'SAR');
 
-      const roundingAmount = append(
-        taxTotal,
-        'cbc:RoundingAmount',
-        (lineTotal + vatAmount).toFixed(2),
-      );
+      const rounding = append(taxTotal, 'cbc:RoundingAmount', (lineTotal + vatAmount).toFixed(2));
 
-      roundingAmount.setAttribute('currencyID', 'SAR');
-
-      /*
-    -------------------------
-    Item
-    -------------------------
-    */
+      rounding.setAttribute('currencyID', 'SAR');
 
       const itemNode = append(invoiceLine, 'cac:Item');
 
@@ -270,18 +302,10 @@ export class XMLHelper {
       const taxCategory = append(itemNode, 'cac:ClassifiedTaxCategory');
 
       append(taxCategory, 'cbc:ID', 'S');
-
       append(taxCategory, 'cbc:Percent', (vatRate * 100).toFixed(2));
 
       const taxScheme = append(taxCategory, 'cac:TaxScheme');
-
       append(taxScheme, 'cbc:ID', 'VAT');
-
-      /*
-    -------------------------
-    Price
-    -------------------------
-    */
 
       const price = append(invoiceLine, 'cac:Price');
 
@@ -293,9 +317,9 @@ export class XMLHelper {
 }
 
 /*
---------------------------------------------------
+--------------------------------
 Share XML
---------------------------------------------------
+--------------------------------
 */
 
 export async function shareInvoiceXML(uri: string) {

@@ -110,7 +110,7 @@ export interface InvoiceXMLInput {
   sellerVat: string;
 
   previousInvoiceHash?: string;
-
+  invoiceCounter?: string;
   totalExclVAT: string;
   totalVAT: string;
   totalInclVAT: string;
