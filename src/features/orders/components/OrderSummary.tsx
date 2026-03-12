@@ -166,7 +166,11 @@ export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onChec
             <TouchableOpacity className="flex-1 bg-gray-200 py-3 rounded-xl items-center">
               <Text className="font-semibold text-gray-700">Save</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={onCheckout} className="flex-1 bg-green-500 py-3 rounded-xl items-center">
+            <TouchableOpacity
+              onPress={onCheckout}
+              disabled={cartItems.length === 0}
+              className={`flex-1 py-3 rounded-xl items-center ${cartItems.length === 0 ? 'bg-gray-300' : 'bg-green-500'}`}
+            >
               <Text className="font-semibold text-white">Checkout</Text>
             </TouchableOpacity>
           </View>

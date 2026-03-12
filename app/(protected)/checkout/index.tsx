@@ -7,7 +7,7 @@ import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 type PaymentMethod = 'Cash/Card' | 'Cash' | 'Card';
 
@@ -73,6 +73,11 @@ export default function CheckoutPage() {
     };
 
     const handleCompletePayment = () => {
+        if (!selectedCustomer) {
+            Alert.alert('Customer Required', 'Please select a customer before completing payment.');
+            return;
+        }
+
         const paymentDetails: any = {
             paymentMethod: selectedPaymentMethod,
             customer: selectedCustomer,
@@ -92,6 +97,11 @@ export default function CheckoutPage() {
     };
 
     const handleSaveAndClear = () => {
+        if (!selectedCustomer) {
+            Alert.alert('Customer Required', 'Please select a customer before saving.');
+            return;
+        }
+
         console.log('Save and Clear');
         dispatch(clearCart());
         router.replace('/');
