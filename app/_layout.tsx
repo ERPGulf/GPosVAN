@@ -1,3 +1,6 @@
+import 'react-native-get-random-values';
+import { Buffer } from 'buffer';
+
 import {
   pushPendingCustomers,
   syncAllCustomers,
@@ -17,6 +20,7 @@ import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import './global.css';
 
+global.Buffer = Buffer;
 const queryClient = new QueryClient();
 const expoDb = openDatabaseSync('van_pos.db', { enableChangeListener: true });
 const db = drizzle(expoDb);

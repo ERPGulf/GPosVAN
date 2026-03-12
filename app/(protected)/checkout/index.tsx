@@ -9,13 +9,13 @@ import { AddCustomerModal } from '@/src/features/customers/components/AddCustome
 import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
-import { saveInvoiceXML, shareInvoiceXML } from '@/src/services/zatca/invoicePipeline';
-import type { Invoice } from '@/src/services/zatca/types';
+import { saveInvoiceXML, shareInvoiceXML } from '@/src/services/zatca_deprecated/invoicePipeline';
+import type { Invoice } from '@/src/services/zatca_deprecated/types';
 import {
   getPreviousInvoiceHash,
   isTaxIncludedInPrice,
   supplier as zatcaSupplier,
-} from '@/src/services/zatca/zatcaConfig';
+} from '@/src/services/zatca_deprecated/zatcaConfig';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { InvoiceService } from '@/src/zatca/invoiceService';
 import { Ionicons } from '@expo/vector-icons';
