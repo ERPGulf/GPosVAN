@@ -2,6 +2,10 @@ import { Buffer } from 'buffer';
 
 export class QREncoder {
   static tlv(tag: number, value: string | Uint8Array): Uint8Array {
+    if (value === undefined || value === null) {
+      throw new Error(`QR TLV tag ${tag} has empty value`);
+    }
+
     const valueBytes = typeof value === 'string' ? new TextEncoder().encode(value) : value;
 
     let lengthBytes: Uint8Array;
@@ -57,6 +61,14 @@ export class QREncoder {
     publicKey: Uint8Array;
     signatureKey: Uint8Array;
   }) {
+    if (!(data.publicKey instanceof Uint8Array)) {
+      throw new Error('QR publicKey must be Uint8Array');
+    }
+
+    if (!(data.signatureKey instanceof Uint8Array)) {
+      throw new Error('QR signatureKey must be Uint8Array');
+    }
+
     const buffers = [
       this.tlv(1, data.seller),
 
@@ -70,8 +82,10 @@ export class QREncoder {
 
       this.tlv(6, data.xmlHash),
 
+      // Signature must be Base64 string
       this.tlv(7, data.signature),
 
+      // Raw bytes
       this.tlv(8, data.publicKey),
 
       this.tlv(9, data.signatureKey),

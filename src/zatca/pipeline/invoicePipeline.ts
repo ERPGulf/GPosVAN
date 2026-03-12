@@ -19,18 +19,10 @@ export async function createInvoicePipeline(
   try {
     const { totals } = invoice;
 
-    /*
-    ---------------------------------
-    Previous Invoice Hash
-    ---------------------------------
-    */
-
     const previousHash = invoice.previousInvoiceHash ?? (await PIHService.getPreviousHash());
 
     /*
-    ---------------------------------
     Build XML
-    ---------------------------------
     */
 
     const xml = XMLHelper.buildInvoiceXML({
@@ -52,54 +44,44 @@ export async function createInvoicePipeline(
     });
 
     /*
-    ---------------------------------
-    Remove nodes not part of hash
-    ---------------------------------
+    Remove nodes excluded from hash
     */
 
     const xmlForHash = XMLHelper.removeTagsForHash(xml);
 
     /*
-    ---------------------------------
-    Canonicalize XML
-    ---------------------------------
+    Canonicalize
     */
 
     const canonicalXML = canonicalizeXML(xmlForHash);
 
     /*
-    ---------------------------------
-    Generate invoice hash
-    ---------------------------------
+    Invoice hash
     */
 
     const invoiceHash = await generateInvoiceHash(canonicalXML);
 
     /*
-    ---------------------------------
     SignedProperties hash
-    ---------------------------------
     */
 
+    const signingTime = invoice.timestamp.split('.')[0].replace('Z', '');
+
     const signedPropertiesHash = await generateSignedPropertiesHash(
-      invoice.timestamp,
+      signingTime,
       certificate.issuer,
       certificate.serialNumber,
       certificate.certDigest,
     );
 
     /*
-    ---------------------------------
-    Sign hash
-    ---------------------------------
+    Sign invoice
     */
 
     const signature = await signInvoiceHash(invoiceHash, privateKey);
 
     /*
-    ---------------------------------
     Inject XML Signature
-    ---------------------------------
     */
 
     const signedXML = injectXMLSignature(xml, {
@@ -110,23 +92,13 @@ export async function createInvoicePipeline(
     });
 
     /*
-    ---------------------------------
-    QR timestamp formatting
-    ---------------------------------
-    */
-
-    const timestamp = invoice.timestamp.replace('Z', '').split('.')[0];
-
-    /*
-    ---------------------------------
-    Generate QR TLV
-    ---------------------------------
+    Generate QR
     */
 
     const qrBase64 = QREncoder.generate({
       seller: invoice.supplier.registrationName,
       vat: invoice.supplier.vatNumber,
-      timestamp,
+      timestamp: signingTime,
       total: totals.totalInclVAT.toFixed(2),
       vatTotal: totals.totalVAT.toFixed(2),
       xmlHash: invoiceHash,
@@ -136,18 +108,10 @@ export async function createInvoicePipeline(
     });
 
     /*
-    ---------------------------------
     Inject QR
-    ---------------------------------
     */
 
     const finalXML = XMLHelper.injectQR(signedXML, qrBase64);
-
-    /*
-    ---------------------------------
-    Store PIH
-    ---------------------------------
-    */
 
     await PIHService.storeHash(invoiceHash);
 
@@ -159,11 +123,7 @@ export async function createInvoicePipeline(
       uuid: invoice.uuid,
     };
   } catch (error: any) {
-    console.error('ZATCA pipeline error:', {
-      message: error.message,
-      stack: error.stack,
-    });
-
+    console.error('ZATCA pipeline error:', error);
     throw new Error(`ZATCA invoice pipeline failed: ${error.message}`);
   }
 }

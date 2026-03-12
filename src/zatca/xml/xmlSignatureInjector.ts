@@ -8,97 +8,131 @@ export interface SignatureInjectionInput {
 }
 
 export function injectXMLSignature(xml: string, input: SignatureInjectionInput): string {
-  const doc = new DOMParser().parseFromString(xml, 'text/xml');
+  const doc = new DOMParser().parseFromString('<root/>', 'text/xml');
 
-  const invoice = doc.documentElement;
-
-  const extNs = 'urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2';
   const sigNs = 'urn:oasis:names:specification:ubl:schema:xsd:CommonSignatureComponents-2';
   const sacNs = 'urn:oasis:names:specification:ubl:schema:xsd:SignatureAggregateComponents-2';
   const sbcNs = 'urn:oasis:names:specification:ubl:schema:xsd:SignatureBasicComponents-2';
   const dsNs = 'http://www.w3.org/2000/09/xmldsig#';
+  const cbcNs = 'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2';
+  const xadesNs = 'http://uri.etsi.org/01903/v1.3.2#';
 
-  const ublExtensions = doc.createElementNS(extNs, 'ext:UBLExtensions');
-  const ublExtension = doc.createElementNS(extNs, 'ext:UBLExtension');
-  const extensionContent = doc.createElementNS(extNs, 'ext:ExtensionContent');
+  const create = (ns: string, tag: string) => doc.createElementNS(ns, tag);
 
-  const documentSignatures = doc.createElementNS(sigNs, 'sig:UBLDocumentSignatures');
+  /*
+  --------------------------------
+  UBLDocumentSignatures
+  --------------------------------
+  */
 
-  const signatureInformation = doc.createElementNS(sacNs, 'sac:SignatureInformation');
+  const documentSignatures = create(sigNs, 'sig:UBLDocumentSignatures');
 
-  const signatureInformationID = doc.createElement('cbc:ID');
+  documentSignatures.setAttribute('xmlns:sac', sacNs);
+  documentSignatures.setAttribute('xmlns:sbc', sbcNs);
+
+  /*
+  --------------------------------
+  SignatureInformation
+  --------------------------------
+  */
+
+  const signatureInformation = create(sacNs, 'sac:SignatureInformation');
+
+  const signatureInformationID = create(cbcNs, 'cbc:ID');
   signatureInformationID.textContent = 'urn:oasis:names:specification:ubl:signature:1';
 
-  const referencedSignatureID = doc.createElementNS(sbcNs, 'sbc:ReferencedSignatureID');
+  const referencedSignatureID = create(sbcNs, 'sbc:ReferencedSignatureID');
+
   referencedSignatureID.textContent = 'urn:oasis:names:specification:ubl:signature:Invoice';
 
   signatureInformation.appendChild(signatureInformationID);
   signatureInformation.appendChild(referencedSignatureID);
 
-  const signature = doc.createElementNS(dsNs, 'ds:Signature');
+  /*
+  --------------------------------
+  ds:Signature
+  --------------------------------
+  */
+
+  const signature = create(dsNs, 'ds:Signature');
   signature.setAttribute('Id', 'signature');
 
-  const signedInfo = doc.createElementNS(dsNs, 'ds:SignedInfo');
+  /*
+  Namespace declarations for XPath
+  */
 
-  const canonicalizationMethod = doc.createElementNS(dsNs, 'ds:CanonicalizationMethod');
+  signature.setAttribute(
+    'xmlns:ext',
+    'urn:oasis:names:specification:ubl:schema:xsd:CommonExtensionComponents-2',
+  );
+
+  signature.setAttribute(
+    'xmlns:cac',
+    'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2',
+  );
+
+  signature.setAttribute(
+    'xmlns:cbc',
+    'urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2',
+  );
+
+  const signedInfo = create(dsNs, 'ds:SignedInfo');
+
+  const canonicalizationMethod = create(dsNs, 'ds:CanonicalizationMethod');
+
   canonicalizationMethod.setAttribute('Algorithm', 'http://www.w3.org/2006/12/xml-c14n11');
 
-  const signatureMethod = doc.createElementNS(dsNs, 'ds:SignatureMethod');
+  const signatureMethod = create(dsNs, 'ds:SignatureMethod');
+
   signatureMethod.setAttribute('Algorithm', 'http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256');
 
   signedInfo.appendChild(canonicalizationMethod);
   signedInfo.appendChild(signatureMethod);
 
   /*
-  -------------------------
-  Reference (Invoice hash)
-  -------------------------
+  Invoice reference
   */
 
-  const reference = doc.createElementNS(dsNs, 'ds:Reference');
+  const reference = create(dsNs, 'ds:Reference');
   reference.setAttribute('Id', 'invoiceSignedData');
   reference.setAttribute('URI', '');
 
-  const transforms = doc.createElementNS(dsNs, 'ds:Transforms');
+  const transforms = create(dsNs, 'ds:Transforms');
 
-  const transform1 = doc.createElementNS(dsNs, 'ds:Transform');
-  transform1.setAttribute('Algorithm', 'http://www.w3.org/TR/1999/REC-xpath-19991116');
+  const transform = (xpath: string) => {
+    const t = create(dsNs, 'ds:Transform');
+    t.setAttribute('Algorithm', 'http://www.w3.org/TR/1999/REC-xpath-19991116');
 
-  const xpath1 = doc.createElementNS(dsNs, 'ds:XPath');
-  xpath1.textContent = 'not(//ancestor-or-self::ext:UBLExtensions)';
+    const xp = create(dsNs, 'ds:XPath');
+    xp.textContent = xpath;
 
-  transform1.appendChild(xpath1);
+    t.appendChild(xp);
 
-  const transform2 = doc.createElementNS(dsNs, 'ds:Transform');
-  transform2.setAttribute('Algorithm', 'http://www.w3.org/TR/1999/REC-xpath-19991116');
+    return t;
+  };
 
-  const xpath2 = doc.createElementNS(dsNs, 'ds:XPath');
-  xpath2.textContent = 'not(//ancestor-or-self::cac:Signature)';
+  transforms.appendChild(transform('not(//ancestor-or-self::ext:UBLExtensions)'));
 
-  transform2.appendChild(xpath2);
+  transforms.appendChild(transform('not(//ancestor-or-self::cac:Signature)'));
 
-  const transform3 = doc.createElementNS(dsNs, 'ds:Transform');
-  transform3.setAttribute('Algorithm', 'http://www.w3.org/TR/1999/REC-xpath-19991116');
+  transforms.appendChild(
+    transform("not(//ancestor-or-self::cac:AdditionalDocumentReference[cbc:ID='QR'])"),
+  );
 
-  const xpath3 = doc.createElementNS(dsNs, 'ds:XPath');
-  xpath3.textContent = "not(//ancestor-or-self::cac:AdditionalDocumentReference[cbc:ID='QR'])";
+  const transform4 = create(dsNs, 'ds:Transform');
 
-  transform3.appendChild(xpath3);
-
-  const transform4 = doc.createElementNS(dsNs, 'ds:Transform');
   transform4.setAttribute('Algorithm', 'http://www.w3.org/2006/12/xml-c14n11');
 
-  transforms.appendChild(transform1);
-  transforms.appendChild(transform2);
-  transforms.appendChild(transform3);
   transforms.appendChild(transform4);
 
   reference.appendChild(transforms);
 
-  const digestMethod = doc.createElementNS(dsNs, 'ds:DigestMethod');
+  const digestMethod = create(dsNs, 'ds:DigestMethod');
+
   digestMethod.setAttribute('Algorithm', 'http://www.w3.org/2001/04/xmlenc#sha256');
 
-  const digestValue = doc.createElementNS(dsNs, 'ds:DigestValue');
+  const digestValue = create(dsNs, 'ds:DigestValue');
+
   digestValue.textContent = input.invoiceHash;
 
   reference.appendChild(digestMethod);
@@ -107,17 +141,21 @@ export function injectXMLSignature(xml: string, input: SignatureInjectionInput):
   signedInfo.appendChild(reference);
 
   /*
-  SignedProperties Reference
+  SignedProperties reference
   */
 
-  const reference2 = doc.createElementNS(dsNs, 'ds:Reference');
+  const reference2 = create(dsNs, 'ds:Reference');
+
   reference2.setAttribute('URI', '#xadesSignedProperties');
+
   reference2.setAttribute('Type', 'http://www.w3.org/2000/09/xmldsig#SignatureProperties');
 
-  const digestMethod2 = doc.createElementNS(dsNs, 'ds:DigestMethod');
+  const digestMethod2 = create(dsNs, 'ds:DigestMethod');
+
   digestMethod2.setAttribute('Algorithm', 'http://www.w3.org/2001/04/xmlenc#sha256');
 
-  const digestValue2 = doc.createElementNS(dsNs, 'ds:DigestValue');
+  const digestValue2 = create(dsNs, 'ds:DigestValue');
+
   digestValue2.textContent = input.signedPropertiesHash;
 
   reference2.appendChild(digestMethod2);
@@ -127,38 +165,67 @@ export function injectXMLSignature(xml: string, input: SignatureInjectionInput):
 
   signature.appendChild(signedInfo);
 
-  const signatureValue = doc.createElementNS(dsNs, 'ds:SignatureValue');
+  /*
+  SignatureValue
+  */
+
+  const signatureValue = create(dsNs, 'ds:SignatureValue');
+
   signatureValue.textContent = input.signatureValue;
 
   signature.appendChild(signatureValue);
 
-  const keyInfo = doc.createElementNS(dsNs, 'ds:KeyInfo');
+  /*
+  Certificate
+  */
 
-  const x509Data = doc.createElementNS(dsNs, 'ds:X509Data');
+  const keyInfo = create(dsNs, 'ds:KeyInfo');
 
-  const certificate = doc.createElementNS(dsNs, 'ds:X509Certificate');
-  certificate.textContent = input.certificateBase64;
+  const x509Data = create(dsNs, 'ds:X509Data');
+
+  const certificate = create(dsNs, 'ds:X509Certificate');
+
+  const cleanCert = input.certificateBase64
+    .replace(/-----BEGIN CERTIFICATE-----/g, '')
+    .replace(/-----END CERTIFICATE-----/g, '')
+    .replace(/\n/g, '');
+
+  certificate.textContent = cleanCert;
 
   x509Data.appendChild(certificate);
   keyInfo.appendChild(x509Data);
 
   signature.appendChild(keyInfo);
 
+  /*
+  SignedProperties container
+  */
+
+  const object = create(dsNs, 'ds:Object');
+
+  const qualifyingProperties = create(xadesNs, 'xades:QualifyingProperties');
+
+  qualifyingProperties.setAttribute('Target', '#signature');
+
+  const signedProperties = create(xadesNs, 'xades:SignedProperties');
+
+  signedProperties.setAttribute('Id', 'xadesSignedProperties');
+
+  qualifyingProperties.appendChild(signedProperties);
+
+  object.appendChild(qualifyingProperties);
+
+  signature.appendChild(object);
+
+  /*
+  Build tree
+  */
+
   signatureInformation.appendChild(signature);
 
   documentSignatures.appendChild(signatureInformation);
 
-  extensionContent.appendChild(documentSignatures);
+  const signatureBlock = new XMLSerializer().serializeToString(documentSignatures);
 
-  ublExtension.appendChild(extensionContent);
-
-  ublExtensions.appendChild(ublExtension);
-
-  if (invoice.firstChild) {
-    invoice.insertBefore(ublExtensions, invoice.firstChild);
-  } else {
-    invoice.appendChild(ublExtensions);
-  }
-
-  return new XMLSerializer().serializeToString(doc);
+  return xml.replace('SIGNATURE_PLACEHOLDER', signatureBlock);
 }

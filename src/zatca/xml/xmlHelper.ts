@@ -28,9 +28,9 @@ export class XMLHelper {
     };
 
     /*
-    --------------------------------
-    UBL Extensions
-    --------------------------------
+    ------------------------------------------------
+    UBL Extensions (signature injected later)
+    ------------------------------------------------
     */
 
     const ext = append(root, 'ext:UBLExtensions');
@@ -40,39 +40,62 @@ export class XMLHelper {
     extContent.appendChild(doc.createTextNode('SIGNATURE_PLACEHOLDER'));
 
     /*
-    --------------------------------
+    ------------------------------------------------
     Basic Metadata
-    --------------------------------
+    ------------------------------------------------
     */
 
     append(root, 'cbc:ProfileID', 'reporting:1.0');
+
     append(root, 'cbc:ID', data.invoiceNumber);
+
     append(root, 'cbc:UUID', uuid);
+
     append(root, 'cbc:IssueDate', data.invoiceDate);
+
     append(root, 'cbc:IssueTime', issueTime);
 
     const type = append(root, 'cbc:InvoiceTypeCode', '388');
     type.setAttribute('name', '0200000');
 
     append(root, 'cbc:DocumentCurrencyCode', 'SAR');
+
     append(root, 'cbc:TaxCurrencyCode', 'SAR');
 
     /*
-    --------------------------------
+    ------------------------------------------------
+    UBL Signature metadata (required by ZATCA)
+    ------------------------------------------------
+    */
+
+    const signature = append(root, 'cac:Signature');
+
+    append(signature, 'cbc:ID', 'urn:oasis:names:specification:ubl:signature:Invoice');
+
+    append(
+      signature,
+      'cbc:SignatureMethod',
+      'urn:oasis:names:specification:ubl:dsig:enveloped:xades',
+    );
+
+    /*
+    ------------------------------------------------
     Invoice Counter (ICV)
-    --------------------------------
+    ------------------------------------------------
     */
 
     if (data.invoiceCounter) {
       const icv = append(root, 'cac:AdditionalDocumentReference');
+
       append(icv, 'cbc:ID', 'ICV');
+
       append(icv, 'cbc:UUID', data.invoiceCounter);
     }
 
     /*
-    --------------------------------
+    ------------------------------------------------
     Previous Invoice Hash (PIH)
-    --------------------------------
+    ------------------------------------------------
     */
 
     if (data.previousInvoiceHash) {
@@ -92,88 +115,121 @@ export class XMLHelper {
     }
 
     /*
-    --------------------------------
+    ------------------------------------------------
     Supplier
-    --------------------------------
+    ------------------------------------------------
     */
 
     const supplier = append(root, 'cac:AccountingSupplierParty');
+
     const party = append(supplier, 'cac:Party');
 
-    const legal = append(party, 'cac:PartyLegalEntity');
-    append(legal, 'cbc:RegistrationName', data.sellerName);
+    /*
+    Seller Identification
+    */
+
+    const identification = append(party, 'cac:PartyIdentification');
+
+    const id = append(identification, 'cbc:ID', data.sellerVat);
+
+    id.setAttribute('schemeID', 'CRN');
+
+    /*
+    VAT registration
+    */
 
     const taxScheme = append(party, 'cac:PartyTaxScheme');
+
     append(taxScheme, 'cbc:CompanyID', data.sellerVat);
 
     const scheme = append(taxScheme, 'cac:TaxScheme');
+
     append(scheme, 'cbc:ID', 'VAT');
 
     /*
-    --------------------------------
+    Legal entity
+    */
+
+    const legal = append(party, 'cac:PartyLegalEntity');
+
+    append(legal, 'cbc:RegistrationName', data.sellerName);
+
+    /*
+    ------------------------------------------------
     Delivery
-    --------------------------------
+    ------------------------------------------------
     */
 
     const delivery = append(root, 'cac:Delivery');
+
     append(delivery, 'cbc:ActualDeliveryDate', data.invoiceDate);
 
     /*
-    --------------------------------
+    ------------------------------------------------
     Payment
-    --------------------------------
+    ------------------------------------------------
     */
 
     const payment = append(root, 'cac:PaymentMeans');
+
     append(payment, 'cbc:PaymentMeansCode', '30');
 
     /*
-    --------------------------------
+    ------------------------------------------------
     TaxTotal
-    --------------------------------
+    ------------------------------------------------
     */
 
     const taxTotal = append(root, 'cac:TaxTotal');
 
     const taxAmount = append(taxTotal, 'cbc:TaxAmount', data.totalVAT);
+
     taxAmount.setAttribute('currencyID', 'SAR');
 
     const subtotal = append(taxTotal, 'cac:TaxSubtotal');
 
     const taxable = append(subtotal, 'cbc:TaxableAmount', data.totalExclVAT);
+
     taxable.setAttribute('currencyID', 'SAR');
 
     const subTax = append(subtotal, 'cbc:TaxAmount', data.totalVAT);
+
     subTax.setAttribute('currencyID', 'SAR');
 
     const category = append(subtotal, 'cac:TaxCategory');
+
     append(category, 'cbc:ID', 'S');
+
     append(category, 'cbc:Percent', '15');
 
     const scheme2 = append(category, 'cac:TaxScheme');
+
     append(scheme2, 'cbc:ID', 'VAT');
 
     /*
-    --------------------------------
-    LegalMonetaryTotal
-    --------------------------------
+    ------------------------------------------------
+    Legal Monetary Total
+    ------------------------------------------------
     */
 
     const monetary = append(root, 'cac:LegalMonetaryTotal');
 
     const excl = append(monetary, 'cbc:TaxExclusiveAmount', data.totalExclVAT);
+
     excl.setAttribute('currencyID', 'SAR');
 
     const incl = append(monetary, 'cbc:TaxInclusiveAmount', data.totalInclVAT);
+
     incl.setAttribute('currencyID', 'SAR');
 
     const payable = append(monetary, 'cbc:PayableAmount', data.totalInclVAT);
+
     payable.setAttribute('currencyID', 'SAR');
 
     /*
-    --------------------------------
+    ------------------------------------------------
     Invoice Lines
-    --------------------------------
+    ------------------------------------------------
     */
 
     if (data.items && data.items.length) {
@@ -181,9 +237,9 @@ export class XMLHelper {
     }
 
     /*
-    --------------------------------
+    ------------------------------------------------
     QR Placeholder
-    --------------------------------
+    ------------------------------------------------
     */
 
     const qr = append(root, 'cac:AdditionalDocumentReference');
@@ -200,9 +256,9 @@ export class XMLHelper {
   }
 
   /*
-  --------------------------------
+  ------------------------------------------------
   Inject QR
-  --------------------------------
+  ------------------------------------------------
   */
 
   static injectQR(xml: string, qrBase64: string) {
@@ -210,19 +266,9 @@ export class XMLHelper {
   }
 
   /*
-  --------------------------------
-  Inject Signature
-  --------------------------------
-  */
-
-  static injectSignature(xml: string, signatureBlock: string) {
-    return xml.replace('SIGNATURE_PLACEHOLDER', signatureBlock);
-  }
-
-  /*
-  --------------------------------
+  ------------------------------------------------
   Remove nodes before hashing
-  --------------------------------
+  ------------------------------------------------
   */
 
   static removeTagsForHash(xml: string) {
@@ -237,6 +283,7 @@ export class XMLHelper {
     };
 
     removeNodes('ext:UBLExtensions');
+
     removeNodes('cac:Signature');
 
     const refs = doc.getElementsByTagName('cac:AdditionalDocumentReference');
@@ -253,9 +300,9 @@ export class XMLHelper {
   }
 
   /*
-  --------------------------------
+  ------------------------------------------------
   Invoice Lines
-  --------------------------------
+  ------------------------------------------------
   */
 
   private static createInvoiceLines(doc: Document, root: Element, items: any[]) {
@@ -267,11 +314,13 @@ export class XMLHelper {
     };
 
     items.forEach((item, index) => {
-      const vatRate = (item.vatRate ?? 15) / 100;
+      const vatRate = item.vatRate ?? 15;
+
+      const vatDecimal = vatRate / 100;
 
       const lineTotal = item.quantity * item.price;
 
-      const vatAmount = lineTotal * vatRate;
+      const vatAmount = lineTotal * vatDecimal;
 
       const invoiceLine = append(root, 'cac:InvoiceLine');
 
@@ -302,9 +351,11 @@ export class XMLHelper {
       const taxCategory = append(itemNode, 'cac:ClassifiedTaxCategory');
 
       append(taxCategory, 'cbc:ID', 'S');
-      append(taxCategory, 'cbc:Percent', (vatRate * 100).toFixed(2));
+
+      append(taxCategory, 'cbc:Percent', vatRate.toString());
 
       const taxScheme = append(taxCategory, 'cac:TaxScheme');
+
       append(taxScheme, 'cbc:ID', 'VAT');
 
       const price = append(invoiceLine, 'cac:Price');
@@ -317,9 +368,9 @@ export class XMLHelper {
 }
 
 /*
---------------------------------
+------------------------------------------------
 Share XML
---------------------------------
+------------------------------------------------
 */
 
 export async function shareInvoiceXML(uri: string) {
