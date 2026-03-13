@@ -1,24 +1,19 @@
 import { Zatca } from '@/src/utils/constants/app.settings';
 import { Buffer } from 'buffer';
-import { CertificateUtils } from './certificateUtils';
 import { Directory, File, Paths } from 'expo-file-system';
+import { CertificateUtils } from './certificateUtils';
 
 export class QRUtils {
   /**
    * Saves QR data as Base64 text file (Expo cannot render bitmap directly like System.Drawing)
    */
   static async saveQR(qrData: string, invoiceUUID: string) {
-    const textBytes = Buffer.from(qrData, 'utf8');
-    const base64Encoded = textBytes.toString('base64');
-
-    // parent invoices directory
     const invoicesDir = new Directory(Paths.document, 'invoices');
 
     if (!invoicesDir.exists) {
       await invoicesDir.create();
     }
 
-    // invoice folder
     const dir = new Directory(invoicesDir, invoiceUUID);
 
     if (!dir.exists) {
@@ -27,7 +22,8 @@ export class QRUtils {
 
     const file = new File(dir, `${invoiceUUID}.txt`);
 
-    await file.write(base64Encoded);
+    // store QR data directly
+    await file.write(qrData);
 
     return file.uri;
   }
@@ -42,19 +38,43 @@ export class QRUtils {
     totalTaxAmount: number,
     signature: Uint8Array,
   ): Promise<string> {
+    console.log('[QR] ===== Generating QR =====');
+
     const tagsBufsArray: Uint8Array[] = [];
 
     const sellerName = this.GetTlvForValue(1, Zatca.Abbr);
+    console.log('[QR] Tag1 Seller:', Zatca.Abbr);
+
     const vatRegistration = this.GetTlvForValue(2, Zatca.TaxId);
+    console.log('[QR] Tag2 VAT:', Zatca.TaxId);
+
     const time = this.GetTlvForValue(3, currentDate);
+    console.log('[QR] Tag3 Timestamp:', currentDate);
+
     const amount = this.GetTlvForValue(4, totalAmount.toFixed(2));
+    console.log('[QR] Tag4 TotalAmount:', totalAmount.toFixed(2));
+
     const taxAmount = this.GetTlvForValue(5, totalTaxAmount.toFixed(2));
+    console.log('[QR] Tag5 TaxAmount:', totalTaxAmount.toFixed(2));
+
     const hash = this.GetTlvForValue(6, xmlHash);
-    const signatureValue = this.GetTlvForValue(7, Buffer.from(signature).toString('base64'));
-    const tag8PublicKey = this.GetTlvForValue(8, CertificateUtils.getPublicKeyHashBytes());
-    const certSignature = await CertificateUtils.getCertificateSignature();
-    const signatureECDA = this.GetTlvForValue(9, certSignature);
-    // const signatureECDA = this.GetTlvForValue(9, await CertificateUtils.getSignatureKeyHashBytes());
+    console.log('[QR] Tag6 InvoiceHash:', xmlHash);
+
+    const signatureBase64 = Buffer.from(signature).toString('base64');
+    const signatureValue = this.GetTlvForValue(7, signatureBase64);
+    console.log('[QR] Tag7 SignatureValue (base64):', signatureBase64);
+
+    const publicKeyBytes = CertificateUtils.getPublicKeyHashBytes();
+    console.log('[QR] Tag8 PublicKey bytes length:', publicKeyBytes.length);
+    console.log('[QR] Tag8 PublicKey hex:', Buffer.from(publicKeyBytes).toString('hex'));
+
+    const tag8PublicKey = this.GetTlvForValue(8, publicKeyBytes);
+
+    const certSignatureBytes = await CertificateUtils.getSignatureKeyHashBytes();
+    console.log('[QR] Tag9 CertSignature length:', certSignatureBytes.length);
+    console.log('[QR] Tag9 CertSignature hex:', Buffer.from(certSignatureBytes).toString('hex'));
+
+    const signatureECDA = this.GetTlvForValue(9, certSignatureBytes);
 
     tagsBufsArray.push(
       sellerName,
@@ -70,7 +90,15 @@ export class QRUtils {
 
     const totalBytes = this.CombineByteArrays(tagsBufsArray);
 
-    return Buffer.from(totalBytes).toString('base64');
+    console.log('[QR] TLV total bytes length:', totalBytes.length);
+    console.log('[QR] TLV hex:', Buffer.from(totalBytes).toString('hex'));
+
+    const qrBase64 = Buffer.from(totalBytes).toString('base64');
+
+    console.log('[QR] Final QR Base64:', qrBase64);
+    console.log('[QR] ===== QR Generation Complete =====');
+
+    return qrBase64;
   }
 
   static CombineByteArrays(byteArrayList: Uint8Array[]): Uint8Array {

@@ -35,13 +35,30 @@ export class XMLHelper {
     discount: number,
   ) {
     try {
-      console.log('[ZATCA] Starting createInvoice', invoiceUUID);
+      console.log('=================================');
+      console.log('[ZATCA] 🚀 Starting Invoice Pipeline');
+      console.log('InvoiceUUID:', invoiceUUID);
+      console.log('InvoiceNumber:', invoiceNumber);
+      console.log('Date:', invoiceDate.toISOString());
+      console.log('=================================');
 
-      const taxTotalAmount = tax;
+      /* ------------------------------------------------ */
+      /* STEP 1: PREPARE CERTIFICATE                      */
+      /* ------------------------------------------------ */
+
+      console.log('[STEP 1] Preparing certificate...');
+      await CertificateUtils.createPEM();
+      console.log('[STEP 1] Certificate ready');
+
+      /* ------------------------------------------------ */
+      /* STEP 2: CREATE XML DOCUMENT                      */
+      /* ------------------------------------------------ */
+
+      console.log('[STEP 2] Building XML document');
 
       const doc = new DOMParser().parseFromString('<root/>', 'text/xml');
 
-      const uuid = randomUUID();
+      const uuid = invoiceUUID; // keep consistent
 
       const root = doc.createElementNS(this.xmlns, 'Invoice');
 
@@ -53,18 +70,33 @@ export class XMLHelper {
       root.setAttribute('xmlns:sac', this.xmlns_sac);
       root.setAttribute('xmlns:sbc', this.xmlns_sbc);
       root.setAttribute('xmlns:ds', this.xmlns_ds);
+
       doc.replaceChild(root, doc.documentElement);
 
-      console.log('[ZATCA] Root XML created');
+      console.log('[STEP 2] Root XML created');
 
-      totalExcludeTax = cartItems.reduce((sum, item) => {
-        const price = Number(item.price ?? item.price ?? 0);
-        const quantity = Number(item.quantity ?? item.quantity ?? 0);
+      /* ------------------------------------------------ */
+      /* STEP 3: CALCULATE TOTALS                         */
+      /* ------------------------------------------------ */
 
-        return sum + price * quantity;
-      }, 0);
+      console.log('[STEP 3] Calculating totals');
 
-      console.log('[ZATCA] Calculated totals', totalExcludeTax);
+      const totals = this.calculateInvoiceTotals(cartItems);
+
+      totalExcludeTax = totals.net;
+      const taxTotalAmount = totals.vat;
+      const totalIncludeTax = totals.gross;
+
+      console.log('[TOTALS]');
+      console.log('Net:', totalExcludeTax);
+      console.log('VAT:', taxTotalAmount);
+      console.log('Gross:', totalIncludeTax);
+
+      /* ------------------------------------------------ */
+      /* STEP 4: BUILD XML BODY                           */
+      /* ------------------------------------------------ */
+
+      console.log('[STEP 4] Constructing invoice XML body');
 
       this.CreateBaseXMLTags(doc, root, invoiceNumber, invoiceDate, uuid);
       this.CreateAdditionalReferenceXMLTags(doc, root, invoiceNumber, previousInvoiceHash);
@@ -82,12 +114,18 @@ export class XMLHelper {
 
       this.CreateItemsTag(doc, root, cartItems);
 
-      console.log('[ZATCA] XML body constructed');
+      console.log('[STEP 4] XML body complete');
+
+      /* ------------------------------------------------ */
+      /* STEP 5: SAVE TEMP XML                            */
+      /* ------------------------------------------------ */
+
+      console.log('[STEP 5] Writing temp XML');
 
       const dir = new Directory(Paths.document, 'invoices', invoiceUUID);
 
       if (!dir.exists) {
-        console.log('[ZATCA] Creating invoice directory:', dir.uri);
+        console.log('[STEP 5] Creating invoice directory:', dir.uri);
         await dir.create({ intermediates: true });
       }
 
@@ -104,102 +142,162 @@ export class XMLHelper {
 
       await tempFile.write(xmlText);
 
-      console.log('[ZATCA] Temp XML written:', tempFile.uri);
+      console.log('[STEP 5] Temp XML written:', tempFile.uri);
 
-      const currentXml = serializer.serializeToString(doc);
+      /* IMPORTANT: reload XML from file for canonicalization */
+      const tempXmlContent = await tempFile.text();
+      /* ------------------------------------------------ */
+      /* STEP 6: CANONICALIZE XML                         */
+      /* ------------------------------------------------ */
 
-      const canonicalXml = await this.CanonicalizeXml(currentXml);
+      console.log('[STEP 6] Canonicalizing XML');
+
+      const canonicalXml = await this.CanonicalizeXml(tempXmlContent);
+
+      console.log('[STEP 6] Canonical XML length:', canonicalXml.length);
+
+      /* ------------------------------------------------ */
+      /* STEP 7: GENERATE INVOICE HASH                    */
+      /* ------------------------------------------------ */
+
+      console.log('[STEP 7] Generating invoice hash');
 
       const invoiceHash = await this.GetInvoiceHash(canonicalXml);
 
-      console.log('[ZATCA] Invoice hash generated:', invoiceHash.base64);
+      console.log('[HASH HEX]', invoiceHash.hex);
+      console.log('[HASH BASE64]', invoiceHash.base64);
+
+      /* ------------------------------------------------ */
+      /* STEP 8: CERTIFICATE DATA                         */
+      /* ------------------------------------------------ */
+
+      console.log('[STEP 8] Extracting certificate info');
 
       const certificateDigestValue = await CertificateUtils.getDigestValue();
       const issuerName = await CertificateUtils.getCertificateIssuer();
       const serialNumber = await CertificateUtils.getSerialNumber();
+
       console.log('CertDigest:', certificateDigestValue);
       console.log('Issuer:', issuerName);
       console.log('Serial:', serialNumber);
+
       if (!certificateDigestValue || !issuerName || !serialNumber) {
-        throw new Error('Certificate information is missing');
+        throw new Error('Certificate info missing');
       }
 
-      const certificateSignInHash = await this.GenerateSignedPropertiesHash(
-        invoiceDate.toISOString().slice(0, 19),
+      /* ------------------------------------------------ */
+      /* STEP 9: SIGNED PROPERTIES HASH                   */
+      /* ------------------------------------------------ */
+
+      console.log('[STEP 9] Generating SignedProperties hash');
+
+      const formattedDate = invoiceDate.toISOString().slice(0, 19);
+
+      const signedPropertiesHash = await this.GenerateSignedPropertiesHash(
+        formattedDate,
         issuerName,
         serialNumber,
         certificateDigestValue,
       );
 
+      console.log('SignedPropertiesHash:', signedPropertiesHash);
+
+      /* ------------------------------------------------ */
+      /* STEP 10: SIGN INVOICE HASH                       */
+      /* ------------------------------------------------ */
+
+      console.log('[STEP 10] Signing invoice hash');
+
       const invoiceSignature = await CertificateUtils.SignHashWithECDSABytes(invoiceHash.hex);
 
-      console.log('[ZATCA] Invoice signed');
+      const signatureBase64 = Buffer.from(invoiceSignature).toString('base64');
+
+      console.log('Signature (base64):', signatureBase64);
+
+      /* ------------------------------------------------ */
+      /* STEP 11: CREATE UBL EXTENSION                    */
+      /* ------------------------------------------------ */
+
+      console.log('[STEP 11] Creating UBL extension');
 
       this.CreateUBLExtension(
         invoiceUUID,
         doc,
         root,
         invoiceDate,
-        invoiceHash.base64, // ds:DigestValue
-        certificateSignInHash, // SignedProperties digest
-        Buffer.from(invoiceSignature).toString('base64'), // ds:SignatureValue
+        invoiceHash.base64,
+        signedPropertiesHash,
+        signatureBase64,
       );
+
+      /* ------------------------------------------------ */
+      /* STEP 12: ADD QR TAG                              */
+      /* ------------------------------------------------ */
+
+      console.log('[STEP 12] Adding QR XML tag');
 
       this.AddQRTag(doc, root);
 
+      /* ------------------------------------------------ */
+      /* STEP 13: SAVE FINAL XML                          */
+      /* ------------------------------------------------ */
+
+      console.log('[STEP 13] Writing final XML');
+
       const finalFile = new File(dir, `${invoiceUUID}.xml`);
 
-      await finalFile.write(serializer.serializeToString(doc));
+      const finalXml = serializer.serializeToString(doc);
 
-      console.log('[ZATCA] Final XML written:', finalFile.uri);
+      await finalFile.write(finalXml);
 
-      await this.WriteSignatureToFile(invoiceUUID, invoiceDate);
-      // test
-      //   const canonicalXml = await this.CanonicalizeXml(xmlText);
+      console.log('[STEP 13] Final XML saved:', finalFile.uri);
 
-      //   const hashValue = await this.ComputeHash(canonicalXml, this.hashAlgorithm);
+      /* ------------------------------------------------ */
+      /* STEP 14: GENERATE QR DATA                        */
+      /* ------------------------------------------------ */
 
-      //   const hashBase64 = Buffer.from(hashValue).toString('base64');
-      const hashBase64 = invoiceHash.base64;
-
-      console.log('InvoiceHash:', invoiceHash.base64);
-      console.log('Signature:', Buffer.from(invoiceSignature).toString('base64'));
-      console.log('SignedPropertiesHash:', certificateSignInHash);
+      console.log('[STEP 14] Generating QR TLV');
 
       const qrData = await QRUtils.GetQRString(
         invoiceHash.base64,
-        invoiceDate.toISOString().slice(0, 19),
+        formattedDate,
         totalExcludeTax + taxTotalAmount,
         taxTotalAmount,
         invoiceSignature,
       );
-
-      console.log('[ZATCA] QR data generated');
-
-      console.log('[ZATCA] UpdateXML path:', finalFile.uri);
-
       await this.UpdateXML(finalFile.uri, qrData);
+      console.log('[STEP 14] QR TLV generated');
+
+      /* ------------------------------------------------ */
+      /* STEP 15: SAVE QR IMAGE                           */
+      /* ------------------------------------------------ */
+
+      console.log('[STEP 15] Saving QR');
 
       await QRUtils.saveQR(qrData, invoiceUUID);
 
-      const finalXml = serializer.serializeToString(doc);
+      console.log('[STEP 15] QR saved');
 
-      console.log('[ZATCA] Invoice pipeline completed successfully');
+      console.log('=================================');
+      console.log('[ZATCA] ✅ Invoice pipeline completed');
+      console.log('=================================');
 
       return {
         xml: finalXml,
-        hash: hashBase64,
-        signature: Buffer.from(invoiceSignature).toString('base64'),
+        hash: invoiceHash.base64,
+        signature: signatureBase64,
         qrBase64: qrData,
         fileUri: finalFile.uri,
       };
     } catch (error: any) {
-      console.error('❌ [ZATCA] Invoice generation failed');
+      console.error('=================================');
+      console.error('[ZATCA] ❌ Invoice pipeline failed');
       console.error('Message:', error?.message);
       console.error('Stack:', error?.stack);
       console.error('Full Error:', JSON.stringify(error, null, 2));
+      console.error('=================================');
 
-      throw error; // rethrow so checkout page can handle it
+      throw error;
     }
   }
 
@@ -210,43 +308,35 @@ export class XMLHelper {
     invoiceDate: Date,
     uuidValue: string,
   ) {
-    // Invoice/ProfileID
     const profileId = doc.createElementNS(this.xmlns_cbc, 'cbc:ProfileID');
     profileId.textContent = 'reporting:1.0';
     root.appendChild(profileId);
 
-    // Invoice/ID
     const id = doc.createElementNS(this.xmlns_cbc, 'cbc:ID');
     id.textContent = `ACC-SINV-${new Date().getFullYear()}-${invoiceNumber}`;
     root.appendChild(id);
 
-    // Invoice/UUID
     const uuid = doc.createElementNS(this.xmlns_cbc, 'cbc:UUID');
     uuid.textContent = uuidValue;
     root.appendChild(uuid);
 
-    // Invoice/IssueDate
     const issueDate = doc.createElementNS(this.xmlns_cbc, 'cbc:IssueDate');
     issueDate.textContent = invoiceDate.toISOString().slice(0, 10);
     root.appendChild(issueDate);
 
-    // Invoice/IssueTime
     const issueTime = doc.createElementNS(this.xmlns_cbc, 'cbc:IssueTime');
-    issueTime.textContent = invoiceDate.toTimeString().slice(0, 8);
+    issueTime.textContent = invoiceDate.toISOString().slice(11, 19);
     root.appendChild(issueTime);
 
-    // Invoice/InvoiceTypeCode
     const invoiceTypeCode = doc.createElementNS(this.xmlns_cbc, 'cbc:InvoiceTypeCode');
     invoiceTypeCode.setAttribute('name', '0200000');
     invoiceTypeCode.textContent = '388';
     root.appendChild(invoiceTypeCode);
 
-    // Invoice/DocumentCurrencyCode
     const documentCurrencyCode = doc.createElementNS(this.xmlns_cbc, 'cbc:DocumentCurrencyCode');
     documentCurrencyCode.textContent = 'SAR';
     root.appendChild(documentCurrencyCode);
 
-    // Invoice/TaxCurrencyCode
     const taxCurrencyCode = doc.createElementNS(this.xmlns_cbc, 'cbc:TaxCurrencyCode');
     taxCurrencyCode.textContent = 'SAR';
     root.appendChild(taxCurrencyCode);
@@ -488,7 +578,14 @@ export class XMLHelper {
 
     const party = doc.createElementNS(this.xmlns_cac, 'cac:Party');
     accountingCustomerParty.appendChild(party);
+    const partyIdentification = doc.createElementNS(this.xmlns_cac, 'cac:PartyIdentification');
+    party.appendChild(partyIdentification);
 
+    const partyId = doc.createElementNS(this.xmlns_cbc, 'cbc:ID');
+    partyId.setAttribute('schemeID', 'OTH');
+    partyId.textContent = customer?.vatNumber || customer?.id || '0000000000';
+
+    partyIdentification.appendChild(partyId);
     const partyTaxScheme = doc.createElementNS(this.xmlns_cac, 'cac:PartyTaxScheme');
     party.appendChild(partyTaxScheme);
 
@@ -507,7 +604,7 @@ export class XMLHelper {
       'cbc',
       'RegistrationName',
       this.xmlns_cbc,
-      customer.Id,
+      customer?.name || customer?.Id || 'Unknown Customer',
     );
   }
   static CreateDeliveryAndPaymentTags(doc: Document, root: Element, date: Date) {
@@ -533,126 +630,97 @@ export class XMLHelper {
   }
 
   static CreateAllowanceTags(doc: Document, root: Element, totalTax: number, discount: number) {
+    if (discount <= 0) return;
+
     const allowanceCharge = doc.createElementNS(this.xmlns_cac, 'cac:AllowanceCharge');
-    root.appendChild(allowanceCharge);
 
     const chargeIndicator = doc.createElementNS(this.xmlns_cbc, 'cbc:ChargeIndicator');
     chargeIndicator.textContent = 'false';
     allowanceCharge.appendChild(chargeIndicator);
 
-    const allowanceChargeReasonCode = doc.createElementNS(
-      this.xmlns_cbc,
-      'cbc:AllowanceChargeReasonCode',
-    );
-    allowanceChargeReasonCode.textContent = '95';
-    allowanceCharge.appendChild(allowanceChargeReasonCode);
+    const reasonCode = doc.createElementNS(this.xmlns_cbc, 'cbc:AllowanceChargeReasonCode');
+    reasonCode.textContent = '95';
+    allowanceCharge.appendChild(reasonCode);
 
-    const allowanceChargeReason = doc.createElementNS(this.xmlns_cbc, 'cbc:AllowanceChargeReason');
-    allowanceChargeReason.textContent = 'Loyalty Discount';
-    allowanceCharge.appendChild(allowanceChargeReason);
+    const reason = doc.createElementNS(this.xmlns_cbc, 'cbc:AllowanceChargeReason');
+    reason.textContent = 'Discount';
+    allowanceCharge.appendChild(reason);
 
     const amount = doc.createElementNS(this.xmlns_cbc, 'cbc:Amount');
     amount.setAttribute('currencyID', 'SAR');
     amount.textContent = discount.toFixed(2);
     allowanceCharge.appendChild(amount);
 
-    const tax = doc.createElementNS(this.xmlns_cac, 'cac:TaxCategory');
-    allowanceCharge.appendChild(tax);
+    const taxCategory = doc.createElementNS(this.xmlns_cac, 'cac:TaxCategory');
 
-    const taxId = doc.createElementNS(this.xmlns_cbc, 'cbc:ID');
-
-    if (discount > 0) {
-      taxId.textContent = 'Z';
-    } else {
-      taxId.textContent = 'S';
-    }
-
-    tax.appendChild(taxId);
+    const id = doc.createElementNS(this.xmlns_cbc, 'cbc:ID');
+    id.textContent = 'S';
+    taxCategory.appendChild(id);
 
     const percent = doc.createElementNS(this.xmlns_cbc, 'cbc:Percent');
     percent.textContent = '15.00';
-    tax.appendChild(percent);
+    taxCategory.appendChild(percent);
 
     const taxScheme = doc.createElementNS(this.xmlns_cac, 'cac:TaxScheme');
-    tax.appendChild(taxScheme);
 
-    const taxSchemeId = doc.createElementNS(this.xmlns_cbc, 'cbc:ID');
-    taxSchemeId.textContent = 'VAT';
-    taxScheme.appendChild(taxSchemeId);
+    const schemeId = doc.createElementNS(this.xmlns_cbc, 'cbc:ID');
+    schemeId.textContent = 'VAT';
 
-    const taxTotal = doc.createElementNS(this.xmlns_cac, 'cac:TaxTotal');
-    root.appendChild(taxTotal);
+    taxScheme.appendChild(schemeId);
+    taxCategory.appendChild(taxScheme);
 
-    const taxAmount = doc.createElementNS(this.xmlns_cbc, 'cbc:TaxAmount');
-    taxAmount.setAttribute('currencyID', 'SAR');
-    taxAmount.textContent = totalTax.toFixed(2);
+    allowanceCharge.appendChild(taxCategory);
 
-    taxTotal.appendChild(taxAmount);
+    root.appendChild(allowanceCharge);
   }
   static CreateTaxTotalWithSubTotal(
     doc: Document,
     root: Element,
     totalTax: number,
-    invoiceNo: number,
+    taxableAmount: number,
   ) {
-    const TaxTotal = doc.createElementNS(this.xmlns_cac, 'cac:TaxTotal');
+    const taxTotal = doc.createElementNS(this.xmlns_cac, 'cac:TaxTotal');
 
-    const TaxAmount = doc.createElementNS(this.xmlns_cbc, 'cbc:TaxAmount');
-    TaxAmount.setAttribute('currencyID', 'SAR');
-    TaxAmount.textContent = totalTax.toFixed(2);
+    const taxAmount = doc.createElementNS(this.xmlns_cbc, 'cbc:TaxAmount');
+    taxAmount.setAttribute('currencyID', 'SAR');
+    taxAmount.textContent = totalTax.toFixed(2);
+    taxTotal.appendChild(taxAmount);
 
-    TaxTotal.appendChild(TaxAmount);
+    const taxSubtotal = doc.createElementNS(this.xmlns_cac, 'cac:TaxSubtotal');
 
-    const TaxSubtotal = doc.createElementNS(this.xmlns_cac, 'cac:TaxSubtotal');
+    const taxable = doc.createElementNS(this.xmlns_cbc, 'cbc:TaxableAmount');
+    taxable.setAttribute('currencyID', 'SAR');
+    taxable.textContent = taxableAmount.toFixed(2);
+    taxSubtotal.appendChild(taxable);
 
-    const TaxableAmount = doc.createElementNS(this.xmlns_cbc, 'cbc:TaxableAmount');
-    TaxableAmount.setAttribute('currencyID', 'SAR');
-    TaxableAmount.textContent = invoiceNo.toFixed(2);
-
-    TaxSubtotal.appendChild(TaxableAmount);
-
-    const TaxAmount1 = doc.createElementNS(this.xmlns_cbc, 'cbc:TaxAmount');
-    TaxAmount1.setAttribute('currencyID', 'SAR');
-    TaxAmount1.textContent = totalTax.toFixed(2);
-
-    TaxSubtotal.appendChild(TaxAmount1);
+    const taxAmount2 = doc.createElementNS(this.xmlns_cbc, 'cbc:TaxAmount');
+    taxAmount2.setAttribute('currencyID', 'SAR');
+    taxAmount2.textContent = totalTax.toFixed(2);
+    taxSubtotal.appendChild(taxAmount2);
 
     const taxCategory = doc.createElementNS(this.xmlns_cac, 'cac:TaxCategory');
 
-    const categeoryID = doc.createElementNS(this.xmlns_cbc, 'cbc:ID');
-    categeoryID.textContent = 'S';
-    taxCategory.appendChild(categeoryID);
+    const id = doc.createElementNS(this.xmlns_cbc, 'cbc:ID');
+    id.textContent = 'S';
+    taxCategory.appendChild(id);
 
-    const categeoryPercentage = doc.createElementNS(this.xmlns_cbc, 'cbc:Percent');
-    categeoryPercentage.textContent = '15.00';
-    taxCategory.appendChild(categeoryPercentage);
-
-    // kept but not appended (same as C#)
-    const taxExemptionReasonCode = doc.createElementNS(
-      this.xmlns_cbc,
-      'cbc:TaxExemptionReasonCode',
-    );
-    taxExemptionReasonCode.textContent = '95';
-
-    const taxExemptionReason = doc.createElementNS(this.xmlns_cbc, 'cbc:TaxExemptionReason');
-    taxExemptionReason.textContent = 'Discount';
+    const percent = doc.createElementNS(this.xmlns_cbc, 'cbc:Percent');
+    percent.textContent = '15.00';
+    taxCategory.appendChild(percent);
 
     const taxScheme = doc.createElementNS(this.xmlns_cac, 'cac:TaxScheme');
 
-    const taxSchemeID = doc.createElementNS(this.xmlns_cbc, 'cbc:ID');
-    taxSchemeID.textContent = 'VAT';
+    const schemeId = doc.createElementNS(this.xmlns_cbc, 'cbc:ID');
+    schemeId.textContent = 'VAT';
 
-    taxScheme.appendChild(taxSchemeID);
+    taxScheme.appendChild(schemeId);
     taxCategory.appendChild(taxScheme);
 
-    // same order as original C#
-    TaxSubtotal.appendChild(TaxAmount1);
-    TaxSubtotal.appendChild(taxCategory);
+    taxSubtotal.appendChild(taxCategory);
 
-    TaxTotal.appendChild(TaxAmount);
-    TaxTotal.appendChild(TaxSubtotal);
+    taxTotal.appendChild(taxSubtotal);
 
-    root.appendChild(TaxTotal);
+    root.appendChild(taxTotal);
   }
   static CreateLegalMonetaryTotalTags(
     doc: Document,
@@ -699,73 +767,72 @@ export class XMLHelper {
       invoiceId.textContent = String(i + 1);
       invoiceLine.appendChild(invoiceId);
 
+      /* ---------------------------
+       Quantity
+    --------------------------- */
+
+      const qty = Number(item.quantity ?? 0);
+      const price = Number(item.price ?? 0);
+
       const invoicedQuantity = doc.createElementNS(this.xmlns_cbc, 'cbc:InvoicedQuantity');
-
       invoicedQuantity.setAttribute('unitCode', item.unitOfMeasure);
-      invoicedQuantity.textContent = Number(item.quantity).toFixed(2);
-
+      invoicedQuantity.textContent = qty.toFixed(2);
       invoiceLine.appendChild(invoicedQuantity);
 
-      let tax = 0;
+      /* ---------------------------
+       Price WITHOUT VAT
+    --------------------------- */
 
-      // TODO(ZATCA-MIGRATION): restore DiscountUtils.GetDiscountRate
-      const itemPrice = item.price ?? 0;
+      let priceWithoutVat = price;
 
       if (Zatca.IsTaxIncludedInPrice) {
-        // TODO(ZATCA-MIGRATION): restore TaxUtility.CalculateTax
-        tax = item.quantity * itemPrice * 0.15;
-      } else {
-        tax = item.quantity * itemPrice * 0.15;
+        priceWithoutVat = price / 1.15;
       }
+
+      /* ---------------------------
+       Line calculations
+    --------------------------- */
+
+      const lineNet = qty * priceWithoutVat;
+      const vat = lineNet * 0.15;
+      const lineGross = lineNet + vat;
+
+      /* ---------------------------
+       LineExtensionAmount (BT-131)
+       must equal qty * priceWithoutVAT
+    --------------------------- */
 
       const lineExtensionAmount = doc.createElementNS(this.xmlns_cbc, 'cbc:LineExtensionAmount');
-
       lineExtensionAmount.setAttribute('currencyID', 'SAR');
-
-      if (Zatca.IsTaxIncludedInPrice) {
-        const amount = item.quantity * itemPrice;
-
-        lineExtensionAmount.textContent = (amount - tax).toFixed(2);
-      } else {
-        lineExtensionAmount.textContent = (item.quantity * itemPrice).toFixed(2);
-      }
-
+      lineExtensionAmount.textContent = lineNet.toFixed(2);
       invoiceLine.appendChild(lineExtensionAmount);
+
+      /* ---------------------------
+       TaxTotal
+    --------------------------- */
 
       const taxTotal = doc.createElementNS(this.xmlns_cac, 'cac:TaxTotal');
 
       const taxAmountTag = doc.createElementNS(this.xmlns_cbc, 'cbc:TaxAmount');
-
       taxAmountTag.setAttribute('currencyID', 'SAR');
-
-      if (Zatca.IsTaxIncludedInPrice) {
-        taxAmountTag.textContent = tax.toFixed(2);
-      } else {
-        taxAmountTag.textContent = (item.quantity * itemPrice * 0.15).toFixed(2);
-      }
-
+      taxAmountTag.textContent = vat.toFixed(2);
       taxTotal.appendChild(taxAmountTag);
 
       const roundingAmount = doc.createElementNS(this.xmlns_cbc, 'cbc:RoundingAmount');
-
       roundingAmount.setAttribute('currencyID', 'SAR');
-
-      if (Zatca.IsTaxIncludedInPrice) {
-        roundingAmount.textContent = (item.quantity * itemPrice).toFixed(2);
-      } else {
-        roundingAmount.textContent = (item.quantity * itemPrice + tax).toFixed(2);
-      }
-
+      roundingAmount.textContent = lineGross.toFixed(2);
       taxTotal.appendChild(roundingAmount);
 
       invoiceLine.appendChild(taxTotal);
 
+      /* ---------------------------
+       Item
+    --------------------------- */
+
       const invItem = doc.createElementNS(this.xmlns_cac, 'cac:Item');
 
       const name = doc.createElementNS(this.xmlns_cbc, 'cbc:Name');
-
       name.textContent = item.name;
-
       invItem.appendChild(name);
 
       const classifiedTaxCategory = doc.createElementNS(
@@ -790,81 +857,62 @@ export class XMLHelper {
       classifiedTaxCategory.appendChild(taxScheme);
 
       invItem.appendChild(classifiedTaxCategory);
-
       invoiceLine.appendChild(invItem);
 
-      const price = doc.createElementNS(this.xmlns_cac, 'cac:Price');
+      /* ---------------------------
+       Price block (VAT exclusive)
+    --------------------------- */
+
+      const priceNode = doc.createElementNS(this.xmlns_cac, 'cac:Price');
 
       const priceAmount = doc.createElementNS(this.xmlns_cbc, 'cbc:PriceAmount');
-
       priceAmount.setAttribute('currencyID', 'SAR');
+      priceAmount.textContent = priceWithoutVat.toFixed(2);
 
-      if (Zatca.IsTaxIncludedInPrice) {
-        // TODO(ZATCA-MIGRATION): restore TaxUtility.CalculateTax
-        priceAmount.textContent = itemPrice.toFixed(2);
-      } else {
-        priceAmount.textContent = itemPrice.toFixed(2);
-      }
-
-      price.appendChild(priceAmount);
-
-      invoiceLine.appendChild(price);
+      priceNode.appendChild(priceAmount);
+      invoiceLine.appendChild(priceNode);
 
       root.appendChild(invoiceLine);
     }
   }
-  static CanonicalizeXmlFromDoc(xmlDoc: Document): string {
+  private static _canonicalize(doc: Document): string {
     try {
+      doc.normalize();
+
       const serializer = new XMLSerializer();
+      let xml = serializer.serializeToString(doc);
 
-      let canonicalXml = serializer.serializeToString(xmlDoc);
+      // Match .NET behavior
+      xml = xml.replace(/\r/g, '').replace(/&#xD;/g, '').replace(/ \/>/g, '/>');
 
-      canonicalXml = canonicalXml.replace(/&#xD;/g, '');
-
-      return canonicalXml;
+      return xml;
     } catch (ex: any) {
       throw new Error('Error occurred during XML canonicalization: ' + ex.message);
     }
+  }
+  static CanonicalizeXmlFromDoc(xmlDoc: Document): string {
+    return this._canonicalize(xmlDoc);
   }
   static CanonicalizeXml(xml: string): string {
-    try {
-      const doc = new DOMParser().parseFromString(xml, 'text/xml');
-
-      const serializer = new XMLSerializer();
-
-      let canonicalXml = serializer.serializeToString(doc);
-
-      // match C# behaviour
-      canonicalXml = canonicalXml.replace(/&#xD;/g, '');
-
-      return canonicalXml;
-    } catch (ex: any) {
-      throw new Error('Error occurred during XML canonicalization: ' + ex.message);
-    }
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
+    return this._canonicalize(doc);
   }
 
-  static async GetInvoiceHash(canonicalizedXml: string): Promise<{
-    hex: string;
-    base64: string;
-  }> {
-    try {
-      const hashHex = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        canonicalizedXml,
-        { encoding: Crypto.CryptoEncoding.HEX },
-      );
+  static async GetInvoiceHash(canonicalXml: string) {
+    const bytes = Buffer.from(canonicalXml, 'utf8');
 
-      const hashBytes = Buffer.from(hashHex, 'hex');
+    const hashHex = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      bytes.toString('binary'),
+      { encoding: Crypto.CryptoEncoding.HEX },
+    );
 
-      const hashBase64 = hashBytes.toString('base64');
+    const hashBytes = Buffer.from(hashHex, 'hex');
 
-      return {
-        hex: hashHex,
-        base64: hashBase64,
-      };
-    } catch (ex: any) {
-      throw new Error('An error occurred while generating the invoice hash: ' + ex.message);
-    }
+    return {
+      hex: hashHex,
+      base64: hashBytes.toString('base64'),
+    };
   }
 
   static async GenerateSignedPropertiesHash(
@@ -873,8 +921,7 @@ export class XMLHelper {
     serialNumber: string,
     encodedCertificateHash: string,
   ): Promise<string> {
-    try {
-      const xmlTemplate = `<xades:SignedProperties xmlns:xades="http://uri.etsi.org/01903/v1.3.2#" Id="xadesSignedProperties">
+    const xmlTemplate = `<xades:SignedProperties xmlns:xades="http://uri.etsi.org/01903/v1.3.2#" Id="xadesSignedProperties">
 <xades:SignedSignatureProperties>
 <xades:SigningTime>${signingTime}</xades:SigningTime>
 <xades:SigningCertificate>
@@ -892,22 +939,19 @@ export class XMLHelper {
 </xades:SignedSignatureProperties>
 </xades:SignedProperties>`;
 
-      const hashHex = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        xmlTemplate,
-        { encoding: Crypto.CryptoEncoding.HEX },
-      );
+    const bytes = Buffer.from(xmlTemplate, 'utf8');
 
-      const hexUtf8Bytes = Buffer.from(hashHex, 'utf8');
+    const hashHex = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      bytes.toString('binary'),
+      { encoding: Crypto.CryptoEncoding.HEX },
+    );
 
-      const signedPropertiesBase64 = hexUtf8Bytes.toString('base64');
+    const hexBytes = Buffer.from(hashHex, 'utf8');
 
-      return signedPropertiesBase64;
-    } catch (ex: any) {
-      throw new Error('Error in generating signed properties hash: ' + ex.message);
-    }
+    return hexBytes.toString('base64');
   }
-  static CreateUBLExtension(
+  static async CreateUBLExtension(
     invoiceNo: string,
     doc: Document,
     root: Element,
@@ -930,9 +974,9 @@ export class XMLHelper {
 
     const uBLDocumentSignatures = doc.createElementNS(this.xmlns_sig, 'sig:UBLDocumentSignatures');
 
-    // uBLDocumentSignatures.setAttribute('xmlns:sig', this.xmlns_sig);
-    // uBLDocumentSignatures.setAttribute('xmlns:sac', this.xmlns_sac);
-    // uBLDocumentSignatures.setAttribute('xmlns:sbc', this.xmlns_sbc);
+    uBLDocumentSignatures.setAttribute('xmlns:sig', this.xmlns_sig);
+    uBLDocumentSignatures.setAttribute('xmlns:sac', this.xmlns_sac);
+    uBLDocumentSignatures.setAttribute('xmlns:sbc', this.xmlns_sbc);
 
     extensionContent.appendChild(uBLDocumentSignatures);
 
@@ -1055,12 +1099,10 @@ export class XMLHelper {
 
     keyInfo.appendChild(x509Data);
 
-    const certBase64 = Zatca.Certificate;
-
-    // const certValue = Buffer.from(certBase64, 'base64').toString('utf8');
+    const certRaw = await CertificateUtils.getCertificateRaw();
+    const certBase64 = Buffer.from(certRaw).toString('base64');
 
     const x509Certificate = doc.createElementNS(this.xmlns_ds, 'ds:X509Certificate');
-
     x509Certificate.textContent = certBase64;
 
     x509Data.appendChild(x509Certificate);
@@ -1203,17 +1245,34 @@ export class XMLHelper {
     }
   }
   static CanonicalizeXml2(xmlDocument: Document): string {
-    try {
-      const serializer = new XMLSerializer();
+    return this._canonicalize(xmlDocument);
+  }
 
-      let canonicalXml = serializer.serializeToString(xmlDocument);
+  static calculateInvoiceTotals(items: InvoiceItem[]) {
+    let net = 0;
+    let vat = 0;
 
-      // Match C# behavior removing carriage returns
-      canonicalXml = canonicalXml.replace(/&#xD;/g, '');
+    for (const item of items) {
+      const qty = Number(item.quantity ?? 0);
+      const price = Number(item.price ?? 0);
 
-      return canonicalXml;
-    } catch (ex: any) {
-      throw new Error('Error occurred in canonicalizing XML: ' + ex.message);
+      let priceWithoutVat = price;
+
+      if (Zatca.IsTaxIncludedInPrice) {
+        priceWithoutVat = price / 1.15;
+      }
+
+      const lineNet = qty * priceWithoutVat;
+      const lineVat = lineNet * 0.15;
+
+      net += lineNet;
+      vat += lineVat;
     }
+
+    return {
+      net: Number(net.toFixed(2)),
+      vat: Number(vat.toFixed(2)),
+      gross: Number((net + vat).toFixed(2)),
+    };
   }
 }

@@ -7,7 +7,7 @@ export const Zatca = {
     'LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUZZd0VBWUhLb1pJemowQ0FRWUZLNEVFQUFvRFFnQUVvV0NLYTBTYTlGSUVyVE92MHVBa0MxVklLWHhVOW5QcAp4MnZsZjR5aE1lank4YzAyWEpibERxN3RQeWRvOG1xMGFoT01tTm84Z3duaTdYdDFLVDlVZUE9PQotLS0tLUVORCBQVUJMSUMgS0VZLS0tLS0K',
   Abbr: 'e',
   TaxId: '399999999900003',
-  CompanyRegistrationNo: '1234567',
+  CompanyRegistrationNo: '1010123456',
   Address: {
     AddressLine1: 'tset6',
     City: 'qatar',

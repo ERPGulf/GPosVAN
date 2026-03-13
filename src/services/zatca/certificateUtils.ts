@@ -1,22 +1,34 @@
+import { X509Certificate } from '@peculiar/x509';
 import { Buffer } from 'buffer';
+import { ec as EC } from 'elliptic';
+import * as Crypto from 'expo-crypto';
 import { File, Paths } from 'expo-file-system';
 import { Zatca } from '../../utils/constants/app.settings';
-import * as Crypto from 'expo-crypto';
-import { X509Certificate } from '@peculiar/x509';
-import { ec as EC } from 'elliptic';
 export class CertificateUtils {
   static async createPEM(): Promise<void> {
+    console.log('[Cert] ===== Creating PEM file =====');
+
     const certificateContent = Buffer.from(Zatca.Certificate, 'base64').toString('utf8');
-
     const publicKey = Buffer.from(Zatca.PublicKey, 'base64').toString('utf8');
-
     const privateKey = Buffer.from(Zatca.PrivateKey, 'base64').toString('utf8');
+
+    console.log('[Cert] Certificate base64 length:', Zatca.Certificate.length);
+    console.log('[Cert] Certificate decoded length:', certificateContent.length);
+
+    console.log('[Cert] PublicKey base64 length:', Zatca.PublicKey.length);
+    console.log('[Cert] PublicKey decoded length:', publicKey.length);
+
+    console.log('[Cert] PrivateKey base64 length:', Zatca.PrivateKey.length);
+    console.log('[Cert] PrivateKey decoded length:', privateKey.length);
+
+    // Print first/last chars only (safe debugging)
+    console.log('[Cert] PublicKey preview:', publicKey.substring(0, 40), '...');
+    console.log('[Cert] PrivateKey preview:', privateKey.substring(0, 40), '...');
 
     let formattedCertificate = '';
 
     formattedCertificate += '-----BEGIN CERTIFICATE-----\n';
 
-    // Split certificate into 64-character lines
     for (let i = 0; i < certificateContent.length; i += 64) {
       formattedCertificate +=
         certificateContent.substring(i, Math.min(i + 64, certificateContent.length)) + '\n';
@@ -27,11 +39,19 @@ export class CertificateUtils {
     formattedCertificate += publicKey;
     formattedCertificate += privateKey;
 
-    const fileName = this.getCertificatePath();
+    const file = new File(Paths.document, 'certificate.pem');
 
-    const file = new File(Paths.document, fileName);
+    console.log('[Cert] Writing PEM file to:', file.uri);
 
     await file.write(formattedCertificate);
+
+    console.log('[Cert] PEM file written successfully');
+
+    const writtenSize = formattedCertificate.length;
+
+    console.log('[Cert] PEM size (chars):', writtenSize);
+
+    console.log('[Cert] ===== PEM creation complete =====');
   }
 
   static async isCertificateExists(): Promise<boolean> {
@@ -49,32 +69,23 @@ export class CertificateUtils {
   }
 
   static async getDigestValue(): Promise<string> {
-    const file = new File(Paths.document, 'certificate.pem');
+    const certificateData = Buffer.from(Zatca.Certificate, 'base64').toString('utf8');
 
-    if (!file.exists) {
-      await this.createPEM();
-    }
+    const certificateBytes = Buffer.from(certificateData, 'utf8');
 
-    const pem = await file.text();
+    const hashHex = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      certificateBytes.toString('binary'),
+      { encoding: Crypto.CryptoEncoding.HEX },
+    );
 
-    const cert = new X509Certificate(pem);
+    const hexBytes = Buffer.from(hashHex, 'utf8');
 
-    // DER certificate bytes
-    const rawBytes = new Uint8Array(cert.rawData);
+    const base64EncodedHash = hexBytes.toString('base64');
 
-    // convert to base64
-    const base64Cert = Buffer.from(rawBytes).toString('base64');
+    console.log('CertDigestValue:', base64EncodedHash);
 
-    // hash base64 string (Expo compatible)
-    const hashHex = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, base64Cert);
-
-    const hashBytes = Buffer.from(hashHex, 'hex');
-
-    const digestBase64 = hashBytes.toString('base64');
-
-    console.log('CertDigestValue:', digestBase64);
-
-    return digestBase64;
+    return base64EncodedHash;
   }
 
   static async getCertificateSignature(): Promise<string> {
@@ -98,15 +109,22 @@ export class CertificateUtils {
 
     return Buffer.from(signatureBytes).toString('base64');
   }
-
   static async SignHashWithECDSA2(hashHex: string): Promise<string> {
     const pk = this.loadECPrivateKeyFromPem();
 
-    const bytes = Buffer.from(hashHex, 'utf8');
+    const data = Buffer.from(hashHex, 'utf8');
 
-    const signatureBytes = await this.signData(pk, bytes);
+    const hash = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      data.toString('binary'),
+      { encoding: Crypto.CryptoEncoding.HEX },
+    );
 
-    return Buffer.from(signatureBytes).toString('base64');
+    const signature = pk.sign(hash);
+
+    const der = signature.toDER();
+
+    return Buffer.from(der).toString('base64');
   }
   static loadECPrivateKeyFromPem() {
     const ec = new EC('p256');
@@ -125,10 +143,11 @@ export class CertificateUtils {
   static async signData(privateKey: EC.KeyPair, dataToSign: Uint8Array) {
     const hashHex = await Crypto.digestStringAsync(
       Crypto.CryptoDigestAlgorithm.SHA256,
-      Buffer.from(dataToSign).toString('utf8'),
+      Buffer.from(dataToSign).toString('binary'),
+      { encoding: Crypto.CryptoEncoding.HEX },
     );
 
-    const signature = privateKey.sign(hashHex);
+    const signature = privateKey.sign(Buffer.from(hashHex, 'hex'));
 
     return Buffer.from(signature.toDER());
   }
@@ -190,7 +209,7 @@ export class CertificateUtils {
 
     const cert = new X509Certificate(pem);
 
-    const hexSerial = cert.serialNumber.replace(/:/g, '');
+    const hexSerial = cert.serialNumber.replace(/:/g, '').toLowerCase();
 
     const decimalSerial = BigInt('0x' + hexSerial).toString(10);
 
@@ -207,16 +226,10 @@ export class CertificateUtils {
 
     const cert = new X509Certificate(pem);
 
-    const raw = new Uint8Array(cert.rawData);
+    const publicKeyRaw = new Uint8Array(cert.publicKey.rawData);
 
-    // locate uncompressed EC public key marker (0x04)
-    const index = raw.findIndex((b, i) => b === 0x04 && raw.length - i >= 65);
-
-    if (index === -1) {
-      throw new Error('EC public key not found in certificate');
-    }
-
-    const ecPoint = raw.slice(index, index + 65);
+    // remove ASN.1 header to get EC point
+    const ecPoint = publicKeyRaw.slice(-65);
 
     return Buffer.from(ecPoint).toString('base64');
   }
@@ -231,16 +244,9 @@ export class CertificateUtils {
 
     const cert = new X509Certificate(pem);
 
-    const raw = new Uint8Array(cert.rawData);
+    const publicKeyRaw = new Uint8Array(cert.publicKey.rawData);
 
-    // Find EC uncompressed public key (0x04 + 64 bytes)
-    const index = raw.findIndex((b, i) => b === 0x04 && raw.length - i >= 65);
-
-    if (index === -1) {
-      throw new Error('The public key is not an ECDSA key.');
-    }
-
-    return raw.slice(index, index + 65);
+    return publicKeyRaw.slice(-65);
   }
   static getPublicKeyHashBytes(): Uint8Array {
     let publicKey = Buffer.from(Zatca.PublicKey, 'base64').toString('utf8');
@@ -279,54 +285,75 @@ export class CertificateUtils {
 
     return Buffer.from(signature).toString('hex').toUpperCase();
   }
+
   static async getSignatureKeyHashBytes(): Promise<Uint8Array> {
-    const file = new File(Paths.document, 'certificate.pem');
+    try {
+      console.log('[Cert] Reading certificate.pem');
 
-    if (!file.exists) {
-      await this.createPEM();
+      const file = new File(Paths.document, 'certificate.pem');
+
+      if (!file.exists) {
+        console.log('[Cert] certificate.pem not found → creating PEM');
+        await this.createPEM();
+      }
+
+      const pem = await file.text();
+
+      console.log('[Cert] PEM length:', pem.length);
+
+      const cert = new X509Certificate(pem);
+
+      console.log('[Cert] Certificate loaded');
+
+      const signature = cert.signature;
+
+      if (!signature) {
+        throw new Error('Certificate signature not found');
+      }
+
+      const signatureBytes = new Uint8Array(signature);
+
+      console.log('[Cert] Signature byte length:', signatureBytes.length);
+
+      console.log('[Cert] Signature (base64):', Buffer.from(signatureBytes).toString('base64'));
+
+      console.log('[Cert] Signature (hex):', Buffer.from(signatureBytes).toString('hex'));
+
+      return signatureBytes;
+    } catch (err: any) {
+      console.error('[Cert] Error extracting certificate signature:', err.message);
+      throw err;
     }
-
-    const pem = await file.text();
-
-    const cert = new X509Certificate(pem);
-
-    return new Uint8Array(cert.signature);
   }
   static async computeDigest(data: Uint8Array, algorithm: string): Promise<Uint8Array> {
-    let algo: Crypto.CryptoDigestAlgorithm;
-
-    switch (algorithm.toUpperCase()) {
-      case 'SHA256':
-      case 'SHA-256':
-        algo = Crypto.CryptoDigestAlgorithm.SHA256;
-        break;
-      case 'SHA1':
-      case 'SHA-1':
-        algo = Crypto.CryptoDigestAlgorithm.SHA1;
-        break;
-      case 'SHA384':
-      case 'SHA-384':
-        algo = Crypto.CryptoDigestAlgorithm.SHA384;
-        break;
-      case 'SHA512':
-      case 'SHA-512':
-        algo = Crypto.CryptoDigestAlgorithm.SHA512;
-        break;
-      default:
-        throw new Error(`Hash algorithm '${algorithm}' is not supported.`);
-    }
-
-    const hex = await Crypto.digestStringAsync(algo, Buffer.from(data).toString('binary'));
+    const hex = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      Buffer.from(data).toString('binary'),
+      { encoding: Crypto.CryptoEncoding.HEX },
+    );
 
     return new Uint8Array(Buffer.from(hex, 'hex'));
   }
   static async SignHashWithECDSABytes(hashHex: string): Promise<Uint8Array> {
-    const pk = this.loadECPrivateKeyFromPem();
+    const ec = new EC('p256');
 
-    const bytes = Buffer.from(hashHex, 'utf8');
+    const pemContent = Buffer.from(Zatca.PrivateKey, 'base64').toString('utf8');
 
-    const signatureBytes = await this.signData(pk, bytes);
+    const keyBase64 = pemContent
+      .replace(/-----BEGIN EC PRIVATE KEY-----/g, '')
+      .replace(/-----END EC PRIVATE KEY-----/g, '')
+      .replace(/\s+/g, '');
 
-    return new Uint8Array(signatureBytes);
+    const keyBytes = Buffer.from(keyBase64, 'base64');
+
+    const key = ec.keyFromPrivate(keyBytes);
+
+    const hashBytes = Buffer.from(hashHex, 'hex');
+
+    const signature = key.sign(hashBytes);
+
+    const der = signature.toDER();
+
+    return new Uint8Array(der);
   }
 }
