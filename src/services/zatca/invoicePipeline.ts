@@ -20,7 +20,7 @@ import { buildQRPayload } from './qr';
 import { signHash } from './signer';
 import { calculateTotals } from './totals';
 import type { Invoice, InvoiceResult } from './types';
-import { buildInvoiceXML, injectQRData, injectUBLExtensions } from './XMLHelper';
+import { buildInvoiceXML, injectQRData, injectUBLExtensions } from './XMLHelper_dep';
 import { savePreviousInvoiceHash } from './zatcaConfig';
 
 /**

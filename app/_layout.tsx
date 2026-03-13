@@ -16,7 +16,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import './global.css';
+import { Buffer } from 'buffer';
 
+global.Buffer = Buffer;
 const queryClient = new QueryClient();
 const expoDb = openDatabaseSync('van_pos.db', { enableChangeListener: true });
 const db = drizzle(expoDb);

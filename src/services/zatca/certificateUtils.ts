@@ -48,47 +48,57 @@ export class CertificateUtils {
     return 'certificate.pem';
   }
 
-  static async getDigestValue(): Promise<string | null> {
-    try {
-      const certificateData = Buffer.from(Zatca.Certificate, 'base64').toString('utf8');
+  static async getDigestValue(): Promise<string> {
+    const file = new File(Paths.document, 'certificate.pem');
 
-      const hexHash = await Crypto.digestStringAsync(
-        Crypto.CryptoDigestAlgorithm.SHA256,
-        certificateData,
-      );
-
-      const hexBytes = Buffer.from(hexHash, 'utf8');
-      const base64EncodedHash = hexBytes.toString('base64');
-
-      console.log(`CertDigestValue: ${base64EncodedHash}`);
-
-      return base64EncodedHash;
-    } catch (e: any) {
-      console.log('Error in obtaining certificate hash: ' + e.message);
-      return null;
+    if (!file.exists) {
+      await this.createPEM();
     }
+
+    const pem = await file.text();
+
+    const cert = new X509Certificate(pem);
+
+    // DER certificate bytes
+    const rawBytes = new Uint8Array(cert.rawData);
+
+    // convert to base64
+    const base64Cert = Buffer.from(rawBytes).toString('base64');
+
+    // hash base64 string (Expo compatible)
+    const hashHex = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, base64Cert);
+
+    const hashBytes = Buffer.from(hashHex, 'hex');
+
+    const digestBase64 = hashBytes.toString('base64');
+
+    console.log('CertDigestValue:', digestBase64);
+
+    return digestBase64;
   }
-  static async getCertificateSignature(): Promise<string | null> {
-    try {
-      const fileName = this.getCertificatePath();
-      const file = new File(fileName);
 
-      if (!file.exists) {
-        await this.createPEM();
-      }
+  static async getCertificateSignature(): Promise<string> {
+    const fileName = this.getCertificatePath();
+    const file = new File(Paths.document, fileName);
 
-      const pem = await file.text();
-
-      const cert = new X509Certificate(pem);
-
-      const signatureBytes = cert.signature;
-
-      return Buffer.from(signatureBytes).toString('base64');
-    } catch (e: any) {
-      console.log('Error obtaining certificate signature: ' + e.message);
-      return null;
+    if (!file.exists) {
+      await this.createPEM();
     }
+
+    const pem = await file.text();
+
+    const cert = new X509Certificate(pem);
+
+    const signatureBuffer = cert.signature; // ArrayBuffer
+    const signatureBytes = new Uint8Array(signatureBuffer);
+
+    if (!signatureBytes || signatureBytes.byteLength === 0) {
+      throw new Error('Certificate signature missing');
+    }
+
+    return Buffer.from(signatureBytes).toString('base64');
   }
+
   static async SignHashWithECDSA2(hashHex: string): Promise<string> {
     const pk = this.loadECPrivateKeyFromPem();
 
@@ -180,7 +190,11 @@ export class CertificateUtils {
 
     const cert = new X509Certificate(pem);
 
-    return cert.serialNumber;
+    const hexSerial = cert.serialNumber.replace(/:/g, '');
+
+    const decimalSerial = BigInt('0x' + hexSerial).toString(10);
+
+    return decimalSerial;
   }
   static async getPublicKeyHash(): Promise<string> {
     const file = new File(Paths.document, 'certificate.pem');
@@ -305,5 +319,14 @@ export class CertificateUtils {
     const hex = await Crypto.digestStringAsync(algo, Buffer.from(data).toString('binary'));
 
     return new Uint8Array(Buffer.from(hex, 'hex'));
+  }
+  static async SignHashWithECDSABytes(hashHex: string): Promise<Uint8Array> {
+    const pk = this.loadECPrivateKeyFromPem();
+
+    const bytes = Buffer.from(hashHex, 'utf8');
+
+    const signatureBytes = await this.signData(pk, bytes);
+
+    return new Uint8Array(signatureBytes);
   }
 }

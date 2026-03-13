@@ -17,7 +17,7 @@ import {
   buildSupplierParty,
   buildTaxTotalWithSubtotal,
   esc,
-} from './XMLHelper';
+} from './XMLHelper_dep';
 
 /* ====================================================================
  * Build credit note XML (without UBL Extensions)

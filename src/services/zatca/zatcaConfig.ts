@@ -5,12 +5,12 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Address, CertificateConfig, SupplierParty } from './types';
+import { Zatca } from '@/src/utils/constants/app.settings';
 
 const PIH_STORAGE_KEY = 'ZATCA_PIH';
 
 /* ─── Default / initial PIH (base-64 SHA-256 of empty or first invoice) ─── */
-const DEFAULT_PIH =
-  'NWZlY2ViNjZmZmM4NmJkMmE2NWQzZDBkYzEyNjUwOTAyNzllMzZhN2M1ZTBkNjEyYjk5OGNlZDQzMjRlMTRhZA==';
+const DEFAULT_PIH = Zatca.Pih;
 
 /* ─── Supplier / seller information ─── */
 const supplierAddress: Address = {

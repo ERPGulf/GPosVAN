@@ -15,6 +15,7 @@ import {
   shareInvoiceXML,
 } from '@/src/services/zatca/invoicePipeline';
 import type { Invoice } from '@/src/services/zatca/types';
+import { XMLHelper } from '@/src/services/zatca/XMLHelper';
 import {
   getPreviousInvoiceHash,
   isTaxIncludedInPrice,
@@ -133,24 +134,39 @@ export default function CheckoutPage() {
         })),
       };
 
-      const result = await createInvoicePipeline(
-        invoice,
-        zatcaCert.certificateBase64,
-        zatcaCert.privateKeyBase64,
+      /* ───────────── Create Invoice using XMLHelper ───────────── */
+
+      const result = await XMLHelper.createInvoice(
+        invoice.uuid,
+        invoice.customer,
+        invoice.items,
+        0,
+        0,
+        now,
+        previousHash,
+        invoice.invoiceNumber,
+        invoice.discount,
       );
-      console.log('ZATCA Invoice Result generated successfully.', result.hash);
 
-      // Save XML to device (optional but recommended for ZATCA)
-      const savedUri = await saveInvoiceXML(invoice.invoiceNumber, result.xml);
+      if (!result) {
+        throw new Error('XMLHelper.createInvoice returned undefined');
+      }
 
-      // Display the QR Code Modal
-      setZatcaResult({ ...result, savedUri });
+      console.log('ZATCA Invoice generated successfully.', result.hash);
+
+      setZatcaResult({
+        xml: result.xml,
+        hash: result.hash,
+        signature: result.signature,
+        qrBase64: result.qrBase64,
+        savedUri: result.fileUri,
+      });
+
       setInvoiceData(invoice);
       setIsZatcaModalVisible(true);
-
-      // Moved dispatch(clearCart()) and router.replace('/') to the Modal close handler
     } catch (error) {
-      console.error('Invoice pipeline error:', error);
+      console.error('Invoice generation error:', error);
+
       Alert.alert('Error', 'Failed to generate invoice. Please try again.');
     } finally {
       setIsProcessing(false);

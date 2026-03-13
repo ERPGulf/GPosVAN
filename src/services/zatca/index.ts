@@ -8,11 +8,11 @@ export { createSalesReturnPipeline } from './salesReturnPipeline';
 
 // ── XML Builders (for advanced / custom usage) ──
 export {
-    buildSalesReturnXML,
-    injectSalesReturnQRData,
-    injectSalesReturnUBLExtensions
+  buildSalesReturnXML,
+  injectSalesReturnQRData,
+  injectSalesReturnUBLExtensions,
 } from './salesReturnBuilder';
-export { buildInvoiceXML, injectQRData, injectUBLExtensions } from './XMLHelper';
+export { buildInvoiceXML, injectQRData, injectUBLExtensions } from './XMLHelper_dep';
 
 // ── QR ──
 export { buildQRPayload } from './qr';
@@ -20,12 +20,12 @@ export type { QRPayloadInput } from './qr';
 
 // ── Certificate utilities ──
 export {
-    getCertificateDigestValue,
-    getCertificateIssuer,
-    getCertificateSignatureBytes,
-    getCleanCertBody,
-    getPublicKeyBytes,
-    getSerialNumber
+  getCertificateDigestValue,
+  getCertificateIssuer,
+  getCertificateSignatureBytes,
+  getCleanCertBody,
+  getPublicKeyBytes,
+  getSerialNumber,
 } from './certificate';
 
 // ── Hashing ──
@@ -42,24 +42,24 @@ export { ZatcaError } from './errors';
 
 // ── Types ──
 export type {
-    Address,
-    CertificateConfig,
-    CustomerParty,
-    Invoice,
-    InvoiceItem,
-    InvoiceResult,
-    InvoiceTotals,
-    SalesReturnInvoice,
-    SupplierParty
+  Address,
+  CertificateConfig,
+  CustomerParty,
+  Invoice,
+  InvoiceItem,
+  InvoiceResult,
+  InvoiceTotals,
+  SalesReturnInvoice,
+  SupplierParty,
 } from './types';
 
 // ── Config / PIH storage ──
 export {
-    certificate,
-    getPreviousInvoiceHash,
-    isTaxIncludedInPrice,
-    savePreviousInvoiceHash,
-    supplier
+  certificate,
+  getPreviousInvoiceHash,
+  isTaxIncludedInPrice,
+  savePreviousInvoiceHash,
+  supplier,
 } from './zatcaConfig';
 
 // ── Utilities ──
