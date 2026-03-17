@@ -7,19 +7,21 @@ import {
 } from '@/src/infrastructure/db/customers.repository';
 import migrations from '@/src/infrastructure/db/migrations/migrations';
 import { syncAllProducts } from '@/src/infrastructure/db/products.repository';
+import { isConfigured } from '@/src/services/configStore';
 import { persistor, store } from '@/src/store/store';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { useMigrations } from 'drizzle-orm/expo-sqlite/migrator';
 import { Slot } from 'expo-router';
 import { openDatabaseSync, SQLiteProvider } from 'expo-sqlite';
-import { Suspense, useEffect } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import './global.css';
 import { fetchPosSettings } from '@/src/services/api/postSettings.service';
+import SetupScreen from '@/app/setup';
 
 global.Buffer = Buffer;
 const queryClient = new QueryClient();
@@ -28,10 +30,18 @@ const db = drizzle(expoDb);
 
 export default function RootLayout() {
   const { success, error } = useMigrations(db, migrations);
+  const [configChecked, setConfigChecked] = useState<boolean | null>(null);
+  const hasSynced = useRef(false);
 
-  // Sync products and customers from API after migrations complete
+  // Check if app has been configured (first launch detection)
   useEffect(() => {
-    if (success) {
+    isConfigured().then(setConfigChecked);
+  }, []);
+
+  // Sync products and customers from API after migrations complete (once only)
+  useEffect(() => {
+    if (success && configChecked && !hasSynced.current) {
+      hasSynced.current = true;
       // First push any offline-created customers, then pull latest data
       pushPendingCustomers(db)
         .then(() => {
@@ -66,7 +76,25 @@ export default function RootLayout() {
           ]);
         });
     }
-  }, [success]);
+  }, [success, configChecked]);
+
+  // Still checking secure store
+  if (configChecked === null) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#22c55e" />
+      </View>
+    );
+  }
+
+  // Not configured — show setup screen inline (no redirect)
+  if (!configChecked) {
+    return (
+      <SafeAreaView className="flex-1 bg-gray-50">
+        <SetupScreen onConfigured={() => setConfigChecked(true)} />
+      </SafeAreaView>
+    );
+  }
 
   if (error) {
     return (
