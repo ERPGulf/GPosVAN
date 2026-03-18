@@ -73,8 +73,16 @@ export function Sidebar({ onToggle }: SidebarProps) {
 
             {/* Bottom Actions */}
             <View className="flex-col w-full items-center pb-4">
-                <Pressable className="flex-col items-center justify-center p-3 rounded-xl gap-1">
-                    <Ionicons name="settings-outline" size={24} color="#9ca3af" />
+                <Pressable
+                    onPress={() => handlePress('/settings/page')}
+                    className={`flex-col items-center justify-center p-3 rounded-xl gap-1 ${
+                        pathname.startsWith('/settings') ? 'bg-green-50' : 'bg-transparent'
+                    }`}>
+                    <Ionicons
+                        name="settings-outline"
+                        size={24}
+                        color={pathname.startsWith('/settings') ? '#22c55e' : '#9ca3af'}
+                    />
                 </Pressable>
             </View>
         </View>
