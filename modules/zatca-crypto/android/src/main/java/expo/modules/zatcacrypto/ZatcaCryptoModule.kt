@@ -94,8 +94,9 @@ class ZatcaCryptoModule : Module() {
   private fun canonicalize(xmlString: String): String {
     val canonicalizer = Canonicalizer.getInstance(Canonicalizer.ALGO_ID_C14N11_OMIT_COMMENTS)
     val xmlBytes = xmlString.toByteArray(Charsets.UTF_8)
-    val result = canonicalizer.canonicalize(xmlBytes)
-    return String(result, Charsets.UTF_8)
+    val output = ByteArrayOutputStream()
+    canonicalizer.canonicalize(xmlBytes, output, false)
+    return output.toString(Charsets.UTF_8.name())
   }
 
   // --- Remove UBLExtensions, Signature, QR AdditionalDocumentReference ---
