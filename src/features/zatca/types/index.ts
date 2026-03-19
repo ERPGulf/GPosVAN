@@ -31,6 +31,8 @@ export interface InvoiceCustomer {
   name: string | null;
   phoneNo: string | null;
   taxId?: string | null;
+  buyerId?: string | null;
+  buyerIdType?: string | null;
   address?: Partial<ZatcaAddress>;
 }
 

@@ -290,8 +290,17 @@ public class ZatcaCryptoModule: Module {
       from: normalized,
       begin: "-----BEGIN CERTIFICATE-----",
       end: "-----END CERTIFICATE-----"
-    ) {
-      return decodeBase64Lenient(certBody)
+    ), let decoded = decodeBase64Lenient(certBody) {
+      if isLikelyDerCertificate(decoded) {
+        return decoded
+      }
+      // PEM body decoded to non-DER — likely nested base64 (base64(base64(DER))).
+      if let nestedText = String(data: decoded, encoding: .utf8),
+         let nestedDer = decodeBase64Lenient(nestedText),
+         isLikelyDerCertificate(nestedDer) {
+        return nestedDer
+      }
+      return decoded
     }
 
     if let decodedText = decodeBase64Text(normalized),
@@ -299,15 +308,16 @@ public class ZatcaCryptoModule: Module {
          from: decodedText,
          begin: "-----BEGIN CERTIFICATE-----",
          end: "-----END CERTIFICATE-----"
-       ) {
-      return decodeBase64Lenient(certBody)
-    }
-
-    // Handle nested base64 payloads: base64(base64(DER-cert)).
-    if let decodedText = decodeBase64Text(normalized),
-       let nestedDer = decodeBase64Lenient(decodedText),
-       isLikelyDerCertificate(nestedDer) {
-      return nestedDer
+       ), let decoded = decodeBase64Lenient(certBody) {
+      if isLikelyDerCertificate(decoded) {
+        return decoded
+      }
+      if let nestedText = String(data: decoded, encoding: .utf8),
+         let nestedDer = decodeBase64Lenient(nestedText),
+         isLikelyDerCertificate(nestedDer) {
+        return nestedDer
+      }
+      return decoded
     }
 
     let compact = normalized
@@ -323,7 +333,7 @@ public class ZatcaCryptoModule: Module {
       return firstDecode
     }
 
-    // Final fallback for text-wrapped base64 DER.
+    // Fallback for nested base64 without PEM headers.
     if let nestedText = String(data: firstDecode, encoding: .utf8),
        let secondDecode = decodeBase64Lenient(nestedText),
        isLikelyDerCertificate(secondDecode) {

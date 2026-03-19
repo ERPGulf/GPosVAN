@@ -34,6 +34,11 @@ interface SelectedCustomer {
   id: string;
   name: string | null;
   phoneNo: string | null;
+  taxId?: string | null;
+  registrationNo?: string | null;
+  registrationType?: string | null;
+  addressLine1?: string | null;
+  city?: string | null;
 }
 
 const PIH_STORAGE_KEY = '@zatca_pih';
@@ -132,7 +137,7 @@ export default function CheckoutPage() {
 
       const tax = cartItems.reduce((sum, item) => {
         const rate = item.product.uomPrice ?? item.product.price ?? 0;
-        const pct = item.product.taxPercentage ?? 0;
+        const pct = item.product.taxPercentage ?? 15;
         return sum + (rate * item.quantity * pct) / 100;
       }, 0);
 
@@ -142,6 +147,14 @@ export default function CheckoutPage() {
           id: selectedCustomer?.id ?? 'WALK_IN',
           name: selectedCustomer?.name ?? 'Walk-in Customer',
           phoneNo: selectedCustomer?.phoneNo ?? null,
+          taxId: selectedCustomer?.taxId ?? null,
+          buyerId: selectedCustomer?.registrationNo ?? selectedCustomer?.id ?? null,
+          buyerIdType: selectedCustomer?.registrationType ?? null,
+          address: {
+            streetName: (selectedCustomer?.addressLine1 ?? '').trim(),
+            cityName: (selectedCustomer?.city ?? '').trim(),
+            countryCode: 'SA',
+          },
         },
         cartItems,
         tax,
@@ -287,6 +300,11 @@ export default function CheckoutPage() {
                             id: customer.id,
                             name: customer.name,
                             phoneNo: customer.phoneNo,
+                            taxId: customer.vatNumber,
+                            registrationNo: customer.customerRegistrationNo,
+                            registrationType: customer.customerRegistrationType,
+                            addressLine1: customer.addressLine1,
+                            city: customer.city,
                           })
                         }
                         className={`flex-row items-center px-4 py-3 border-b border-gray-50 ${

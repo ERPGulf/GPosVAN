@@ -24,6 +24,40 @@ function fmt(n: number): string {
   return n.toFixed(2);
 }
 
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+function sanitizeText(value: string | null | undefined, fallback: string, maxLength = 127): string {
+  const text = (value ?? '').trim();
+  if (!text) return fallback;
+  return text.slice(0, maxLength);
+}
+
+function digitsOnly(value: string | null | undefined): string {
+  return (value ?? '').replace(/\D/g, '');
+}
+
+function isValidSaudiVat(value: string | null | undefined): boolean {
+  const vat = digitsOnly(value);
+  return /^3\d{13}3$/.test(vat);
+}
+
+function isLikelyCrn(value: string | null | undefined): boolean {
+  const crn = digitsOnly(value);
+  return /^\d{10}$/.test(crn);
+}
+
+function normalizeSaudiPostalCode(value: string | null | undefined): string {
+  const code = digitsOnly(value);
+  return code.length >= 5 ? code.slice(0, 5) : '00000';
+}
+
+function normalizeBuildingNumber(value: string | null | undefined): string {
+  const building = sanitizeText(value, '1', 20);
+  return building;
+}
+
 function escapeXml(s: string): string {
   return s
     .replace(/&/g, '&amp;')
@@ -96,11 +130,13 @@ function buildQRTag(): string {
 
 function buildAccountingSupplierParty(config: ZatcaConfig): string {
   const addr = config.address;
+  const supplierId = (config.companyRegistrationNo ?? '').trim();
+  const supplierSchemeId = isLikelyCrn(supplierId) ? 'CRN' : 'NAT';
   return (
     `\n  \n  <cac:AccountingSupplierParty>` +
     `\n    <cac:Party>` +
     `\n      <cac:PartyIdentification>` +
-    `\n        <cbc:ID schemeID="CRN">${escapeXml(config.companyRegistrationNo)}</cbc:ID>` +
+    `\n        <cbc:ID schemeID="${supplierSchemeId}">${escapeXml(supplierId)}</cbc:ID>` +
     `\n      </cac:PartyIdentification>` +
     `\n      <cac:PostalAddress>` +
     `\n        <cbc:StreetName>${escapeXml(addr.streetName)}</cbc:StreetName>` +
@@ -128,11 +164,57 @@ function buildAccountingSupplierParty(config: ZatcaConfig): string {
   );
 }
 
-function buildAccountingCustomerParty(customer: InvoiceCustomer): string {
+function buildAccountingCustomerParty(
+  customer: InvoiceCustomer,
+  invoiceSubType: InvoiceSubType,
+): string {
+  const isStandard = invoiceSubType === '0100000';
+  const buyerTaxId = isValidSaudiVat(customer.taxId) ? digitsOnly(customer.taxId) : '';
+  const otherBuyerId = (customer.buyerId ?? customer.id ?? '').trim();
+  const buyerIdType = (customer.buyerIdType ?? '').trim().toUpperCase();
+  const buyerSchemeId =
+    buyerIdType === 'CRN'
+      ? isLikelyCrn(otherBuyerId)
+        ? 'CRN'
+        : 'NAT'
+      : buyerIdType === 'TIN'
+        ? 'TIN'
+        : 'NAT';
+
+  const streetName = sanitizeText(customer.address?.streetName, 'N/A');
+  const cityName = sanitizeText(customer.address?.cityName, 'N/A');
+  const districtName = sanitizeText(customer.address?.citySubdivisionName ?? cityName, cityName);
+  const buildingNumber = normalizeBuildingNumber(customer.address?.buildingNumber);
+  const postalZone = normalizeSaudiPostalCode(customer.address?.postalZone);
+  const countryCode = sanitizeText(customer.address?.countryCode, 'SA', 2).toUpperCase();
+
+  const partyIdentificationXml =
+    isStandard && !buyerTaxId && otherBuyerId
+      ? `\n      <cac:PartyIdentification>` +
+        `\n        <cbc:ID schemeID="${escapeXml(buyerSchemeId)}">${escapeXml(otherBuyerId)}</cbc:ID>` +
+        `\n      </cac:PartyIdentification>`
+      : '';
+
+  const partyTaxSchemeCompanyIdXml = buyerTaxId
+    ? `\n        <cbc:CompanyID>${escapeXml(buyerTaxId)}</cbc:CompanyID>`
+    : '';
+
   return (
     `\n  <cac:AccountingCustomerParty>` +
     `\n    <cac:Party>` +
+    partyIdentificationXml +
+    `\n      <cac:PostalAddress>` +
+    `\n        <cbc:StreetName>${escapeXml(streetName)}</cbc:StreetName>` +
+    `\n        <cbc:BuildingNumber>${escapeXml(buildingNumber)}</cbc:BuildingNumber>` +
+    `\n        <cbc:CitySubdivisionName>${escapeXml(districtName)}</cbc:CitySubdivisionName>` +
+    `\n        <cbc:CityName>${escapeXml(cityName)}</cbc:CityName>` +
+    `\n        <cbc:PostalZone>${escapeXml(postalZone)}</cbc:PostalZone>` +
+    `\n        <cac:Country>` +
+    `\n          <cbc:IdentificationCode>${escapeXml(countryCode)}</cbc:IdentificationCode>` +
+    `\n        </cac:Country>` +
+    `\n      </cac:PostalAddress>` +
     `\n      <cac:PartyTaxScheme>` +
+    partyTaxSchemeCompanyIdXml +
     `\n        <cac:TaxScheme>` +
     `\n          <cbc:ID>VAT</cbc:ID>` +
     `\n        </cac:TaxScheme>` +
@@ -216,6 +298,7 @@ function buildLegalMonetaryTotal(
 }
 
 function buildInvoiceLines(cartItems: CartItem[], isTaxIncluded: boolean): string {
+  const vatRate = 15;
   let lines = '';
   for (let i = 0; i < cartItems.length; i++) {
     const item = cartItems[i];
@@ -229,16 +312,17 @@ function buildInvoiceLines(cartItems: CartItem[], isTaxIncluded: boolean): strin
     let roundingAmount: number;
 
     if (isTaxIncluded) {
-      const taxCalc = calculateTax(quantity * itemPrice, 15);
-      tax = taxCalc.taxAmount;
-      lineExtension = quantity * itemPrice - tax;
-      pricePerUnit = calculateTax(itemPrice, 15).productPrice;
-      roundingAmount = quantity * itemPrice;
+      const grossLine = round2(quantity * itemPrice);
+      const taxCalc = calculateTax(grossLine, vatRate);
+      tax = round2(taxCalc.taxAmount);
+      lineExtension = round2(grossLine - tax);
+      pricePerUnit = round2(calculateTax(itemPrice, vatRate).productPrice);
+      roundingAmount = grossLine;
     } else {
-      tax = quantity * itemPrice * 0.15;
-      lineExtension = quantity * itemPrice;
-      pricePerUnit = itemPrice;
-      roundingAmount = quantity * itemPrice + tax;
+      lineExtension = round2(quantity * itemPrice);
+      tax = round2((lineExtension * vatRate) / 100);
+      pricePerUnit = round2(itemPrice);
+      roundingAmount = round2(lineExtension + tax);
     }
 
     lines +=
@@ -403,7 +487,7 @@ export function buildBaseInvoiceXml(params: BuildInvoiceXmlParams): string {
   xml += buildAdditionalReferenceTags(invoiceNumber, previousInvoiceHash);
   xml += buildQRTag();
   xml += buildAccountingSupplierParty(config);
-  xml += buildAccountingCustomerParty(customer);
+  xml += buildAccountingCustomerParty(customer, invoiceSubType);
   xml += buildDeliveryAndPayment(invoiceDate);
   xml += buildAllowanceCharge(tax, discount);
   xml += buildTaxTotalWithSubtotal(tax, totalExcludeTax);

@@ -37,6 +37,10 @@ function formatDateTime(d: Date): string {
   return `${date}T${time}`;
 }
 
+function round2(n: number): number {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
 function tryBase64Decode(value: string): string | null {
   let normalized = value.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
 
@@ -196,11 +200,13 @@ export function createInvoice(params: InvoiceParams, config: ZatcaConfig): Invoi
       }
     }
 
+    const tax = round2((totalExcludeTax * 15) / 100);
+
     zatcaLogger.info('Invoice totals computed', {
       invoiceUUID,
-      totalExcludeTax: Number(totalExcludeTax.toFixed(2)),
-      tax: Number(params.tax.toFixed(2)),
-      discount: Number(params.discount.toFixed(2)),
+      totalExcludeTax: round2(totalExcludeTax),
+      tax,
+      discount: round2(params.discount),
     });
 
     // Step 1: Build base XML
@@ -213,7 +219,7 @@ export function createInvoice(params: InvoiceParams, config: ZatcaConfig): Invoi
       previousInvoiceHash: params.previousInvoiceHash,
       customer: params.customer,
       cartItems,
-      tax: params.tax,
+      tax,
       totalExcludeTax,
       discount: params.discount,
       config,
@@ -293,13 +299,13 @@ export function createInvoice(params: InvoiceParams, config: ZatcaConfig): Invoi
     xml = insertSignedPropertiesObject(xml, signedPropertiesObject);
 
     // Step 8: Compute QR data
-    const totalAmount = totalExcludeTax + params.tax;
+    const totalAmount = totalExcludeTax + tax;
     const qrData = getQRString(
       config.abbr,
       config.taxId,
       signingTime,
       totalAmount.toFixed(2),
-      params.tax.toFixed(2),
+      tax.toFixed(2),
       invoiceHash.base64,
       signatureResult.signatureBase64,
       certInfo.publicKeyBytes,
