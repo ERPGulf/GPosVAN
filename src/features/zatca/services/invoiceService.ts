@@ -83,6 +83,7 @@ function normalizeCertificateContent(raw: string): string {
         .replace(/-----END CERTIFICATE-----/g, '')
         .replace(/\s+/g, '');
     }
+
     if (looksLikeBase64Body(decoded)) {
       return decoded.replace(/\s+/g, '');
     }

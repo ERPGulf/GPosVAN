@@ -1,17 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ZatcaConfig } from '../types';
 import { zatcaLogger } from './zatcaLogger';
+import { TEST_ZATCA_SETTINGS_PAYLOAD } from './zatcaTestPayload';
 
 const ZATCA_CONFIG_KEY = '@zatca_config';
-const SETTINGS_KEYS_CANDIDATES = [
-  '@app_settings',
-  'app_settings',
-  '@settings',
-  'settings',
-  '@pos_settings',
-  'pos_settings',
-  'persist:auth',
-] as const;
 
 type MaybeBooleanNumber = boolean | number | null | undefined;
 
@@ -41,43 +33,10 @@ export interface BackendConfigPayload {
   is_tax_included_in_price?: MaybeBooleanNumber;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-function tryParseJson(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
-}
-
-function extractSettingsLikePayload(raw: unknown): BackendConfigPayload | null {
-  if (!isObject(raw)) return null;
-
-  // Direct shape: { zatca: { ... } }
-  if ('zatca' in raw) {
-    return raw as BackendConfigPayload;
-  }
-
-  // Wrapped shape: { data: { zatca: { ... } } }
-  const data = (raw as Record<string, unknown>).data;
-  if (isObject(data) && 'zatca' in data) {
-    return data as BackendConfigPayload;
-  }
-
-  // Persisted auth from redux-persist can store stringified user field
-  // Example: { user: "{...}" }
-  const user = (raw as Record<string, unknown>).user;
-  if (typeof user === 'string') {
-    const parsedUser = tryParseJson(user);
-    if (isObject(parsedUser) && 'zatca' in parsedUser) {
-      return parsedUser as BackendConfigPayload;
-    }
-  }
-
-  return null;
+function getForcedTestZatcaConfig(): ZatcaConfig {
+  // TODO: Remove this override and restore backend/storage-driven config after the
+  // certificate encoding issue is resolved consistently across devices.
+  return normalizeBackendZatcaConfig(TEST_ZATCA_SETTINGS_PAYLOAD);
 }
 
 function toBool(value: MaybeBooleanNumber, fallback = false): boolean {
@@ -148,8 +107,8 @@ export function normalizeBackendZatcaConfig(payload: BackendConfigPayload): Zatc
 export async function setZatcaConfigFromBackend(
   payload: BackendConfigPayload,
 ): Promise<ZatcaConfig> {
-  zatcaLogger.info('Normalizing ZATCA config from backend payload');
-  const normalized = normalizeBackendZatcaConfig(payload);
+  zatcaLogger.info('Using hardcoded ZATCA test payload instead of backend payload');
+  const normalized = getForcedTestZatcaConfig();
   await setZatcaConfig(normalized);
   zatcaLogger.info('ZATCA config normalized and stored', {
     taxId: normalized.taxId,
@@ -159,22 +118,14 @@ export async function setZatcaConfigFromBackend(
 }
 
 export async function getZatcaConfig(): Promise<ZatcaConfig | null> {
-  const json = await AsyncStorage.getItem(ZATCA_CONFIG_KEY);
-  if (!json) return null;
-  try {
-    const parsed = JSON.parse(json) as ZatcaConfig;
-    zatcaLogger.debug('Loaded ZATCA config from storage', {
-      hasTaxId: Boolean(parsed.taxId),
-      hasCertificate: Boolean(parsed.certificate),
-      isTaxIncludedInPrice: parsed.isTaxIncludedInPrice,
-    });
-    return parsed;
-  } catch (error) {
-    zatcaLogger.error('Failed to parse ZATCA config from storage', error, {
-      storageKey: ZATCA_CONFIG_KEY,
-    });
-    return null;
-  }
+  const config = getForcedTestZatcaConfig();
+  await setZatcaConfig(config);
+  zatcaLogger.debug('Loaded hardcoded ZATCA test config', {
+    hasTaxId: Boolean(config.taxId),
+    hasCertificate: Boolean(config.certificate),
+    isTaxIncludedInPrice: config.isTaxIncludedInPrice,
+  });
+  return config;
 }
 
 /**
@@ -182,39 +133,12 @@ export async function getZatcaConfig(): Promise<ZatcaConfig | null> {
  * If found and valid, writes normalized config into @zatca_config and returns it.
  */
 export async function hydrateZatcaConfigFromStorage(): Promise<ZatcaConfig | null> {
-  zatcaLogger.info('Hydrating ZATCA config from storage candidates', {
-    keys: SETTINGS_KEYS_CANDIDATES.length,
+  const normalized = getForcedTestZatcaConfig();
+  await setZatcaConfig(normalized);
+  zatcaLogger.info('Hydrated ZATCA config from hardcoded test payload', {
+    taxId: normalized.taxId,
   });
-
-  for (const key of SETTINGS_KEYS_CANDIDATES) {
-    const raw = await AsyncStorage.getItem(key);
-    if (!raw) continue;
-
-    const parsed = tryParseJson(raw);
-    if (!parsed) continue;
-
-    const payload = extractSettingsLikePayload(parsed);
-    if (!payload) continue;
-
-    try {
-      const normalized = normalizeBackendZatcaConfig(payload);
-      await setZatcaConfig(normalized);
-      zatcaLogger.info('Hydrated ZATCA config successfully', {
-        sourceKey: key,
-        taxId: normalized.taxId,
-      });
-      return normalized;
-    } catch (error) {
-      zatcaLogger.warn('Invalid ZATCA config payload candidate', {
-        sourceKey: key,
-        reason: error instanceof Error ? error.message : 'unknown',
-      });
-      // Keep trying other keys
-    }
-  }
-
-  zatcaLogger.warn('No valid ZATCA config found in storage candidates');
-  return null;
+  return normalized;
 }
 
 export async function setZatcaConfig(config: ZatcaConfig): Promise<void> {
