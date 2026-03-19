@@ -37,6 +37,12 @@ declare class ZatcaCryptoModule extends NativeModule {
   parseCertificate(certPem: string): CertificateInfo;
 
   /**
+   * Build combined PEM content like legacy C# CreatePEM:
+   * BEGIN/END CERTIFICATE (64-char lines), then public key text, then private key text.
+   */
+  createPemBundle(certificate: string, publicKey: string, privateKey: string): string;
+
+  /**
    * Compute certificate digest matching ZATCA's getDigestValue:
    * SHA-256(certContent) → hex string → base64(utf8(hex))
    */

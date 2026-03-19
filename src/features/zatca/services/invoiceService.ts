@@ -13,7 +13,12 @@
  * 9. Compute final canonical hash for PIH
  */
 import type { InvoiceParams, InvoiceResult, ZatcaConfig } from '../types';
-import { getCertificateInfo, getDigestValue, signHashWithECDSA } from './certificateUtils';
+import {
+  createPemBundle,
+  getCertificateInfo,
+  getDigestValue,
+  signHashWithECDSA,
+} from './certificateUtils';
 import {
   canonicalizeXml,
   computeHashBase64,
@@ -32,8 +37,9 @@ import {
 import { zatcaLogger } from './zatcaLogger';
 
 function formatDateTime(d: Date): string {
-  const date = d.toISOString().split('T')[0];
-  const time = d.toTimeString().split(' ')[0];
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const date = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  const time = `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
   return `${date}T${time}`;
 }
 
@@ -41,90 +47,118 @@ function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
 }
 
-function tryBase64Decode(value: string): string | null {
-  let normalized = value.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
-
-  if (!normalized) return null;
-
-  const remainder = normalized.length % 4;
-  if (remainder !== 0) {
-    normalized = normalized + '='.repeat(4 - remainder);
-  }
-
+function tryDecodeBase64Utf8(value: string): string | null {
   try {
-    return atob(normalized);
+    return atob(value.trim());
   } catch {
     return null;
   }
 }
 
-function stripWhitespace(value: string): string {
-  return value.replace(/\s+/g, '');
+function printableRatio(value: string): number {
+  if (!value) return 0;
+  let printable = 0;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    const isPrintableAscii = code >= 32 && code <= 126;
+    const isWhitespace = code === 10 || code === 13 || code === 9;
+    if (isPrintableAscii || isWhitespace) printable++;
+  }
+  return printable / value.length;
 }
 
-function extractCertificateBody(value: string): string {
-  return stripWhitespace(
-    value
+function looksLikeBase64Body(value: string): boolean {
+  const compact = value.replace(/\s+/g, '');
+  return compact.length > 100 && /^[A-Za-z0-9+/=]+$/.test(compact);
+}
+
+function normalizeCertificateContent(raw: string): string {
+  const direct = raw.trim();
+  const decoded = tryDecodeBase64Utf8(direct)?.trim();
+
+  if (decoded && printableRatio(decoded) > 0.9) {
+    if (decoded.includes('BEGIN CERTIFICATE')) {
+      return decoded
+        .replace(/-----BEGIN CERTIFICATE-----/g, '')
+        .replace(/-----END CERTIFICATE-----/g, '')
+        .replace(/\s+/g, '');
+    }
+    if (looksLikeBase64Body(decoded)) {
+      return decoded.replace(/\s+/g, '');
+    }
+  }
+
+  if (direct.includes('BEGIN CERTIFICATE')) {
+    return direct
       .replace(/-----BEGIN CERTIFICATE-----/g, '')
       .replace(/-----END CERTIFICATE-----/g, '')
-      .replace(/\\n/g, ''),
-  );
+      .replace(/\s+/g, '');
+  }
+
+  if (looksLikeBase64Body(direct)) {
+    return direct.replace(/\s+/g, '');
+  }
+
+  throw new Error('Invalid ZATCA certificate content');
 }
 
-function looksLikeBase64(value: string): boolean {
-  const compact = stripWhitespace(value);
-  return compact.length > 0 && /^[A-Za-z0-9+/=]+$/.test(compact);
-}
+function normalizePrivateKeyPem(raw: string): string {
+  const direct = raw.trim().replace(/\\n/g, '\n');
+  const decoded = tryDecodeBase64Utf8(direct)?.trim().replace(/\\n/g, '\n');
 
-function collectCertificateCandidates(rawValue: string): string[] {
-  const direct = rawValue.trim();
-  const decoded = tryBase64Decode(direct)?.trim() ?? '';
-  const decodedTwice = decoded ? (tryBase64Decode(decoded)?.trim() ?? '') : '';
+  if (decoded && printableRatio(decoded) > 0.9) {
+    if (decoded.includes('BEGIN EC PRIVATE KEY') || decoded.includes('BEGIN PRIVATE KEY')) {
+      return decoded;
+    }
+  }
 
-  const directPem = direct.includes('BEGIN CERTIFICATE') ? extractCertificateBody(direct) : '';
-  const decodedPem = decoded.includes('BEGIN CERTIFICATE') ? extractCertificateBody(decoded) : '';
-  const decodedTwicePem = decodedTwice.includes('BEGIN CERTIFICATE')
-    ? extractCertificateBody(decodedTwice)
-    : '';
-
-  const candidates: string[] = [];
-
-  if (decodedTwicePem) candidates.push(decodedTwicePem);
-  if (decodedPem) candidates.push(decodedPem);
-  if (directPem) candidates.push(directPem);
-
-  if (looksLikeBase64(decodedTwice)) candidates.push(stripWhitespace(decodedTwice));
-  if (looksLikeBase64(decoded)) candidates.push(stripWhitespace(decoded));
-  if (looksLikeBase64(direct)) candidates.push(stripWhitespace(direct));
-
-  // Keep unique candidates and drop obviously invalid short payloads.
-  return Array.from(new Set(candidates)).filter((item) => item.length > 300);
-}
-
-function normalizePrivateKey(rawValue: string): string {
-  const direct = rawValue.trim();
   if (direct.includes('BEGIN EC PRIVATE KEY') || direct.includes('BEGIN PRIVATE KEY')) {
-    return direct.replace(/\\n/g, '\n');
+    return direct;
   }
 
-  const decoded = tryBase64Decode(direct)?.trim();
-  if (
-    decoded &&
-    (decoded.includes('BEGIN EC PRIVATE KEY') || decoded.includes('BEGIN PRIVATE KEY'))
-  ) {
-    return decoded.replace(/\\n/g, '\n');
-  }
-
-  return direct;
+  throw new Error('Invalid ZATCA private key content');
 }
 
-function buildCertificatePem(certContent: string): string {
-  let pem = '-----BEGIN CERTIFICATE-----\n';
-  for (let i = 0; i < certContent.length; i += 64) {
-    pem += certContent.substring(i, Math.min(i + 64, certContent.length)) + '\n';
+function normalizePublicKeyPem(raw: string): string {
+  const direct = raw.trim().replace(/\\n/g, '\n');
+  const decoded = tryDecodeBase64Utf8(direct)?.trim().replace(/\\n/g, '\n');
+
+  if (decoded && printableRatio(decoded) > 0.9 && decoded.includes('BEGIN PUBLIC KEY')) {
+    return decoded;
   }
-  pem += '-----END CERTIFICATE-----';
-  return pem;
+
+  if (direct.includes('BEGIN PUBLIC KEY')) {
+    return direct;
+  }
+
+  throw new Error('Invalid ZATCA public key content');
+}
+
+function decodeBase64BytesStrict(value: string, fieldName: string): Uint8Array {
+  const normalized = value.replace(/\s+/g, '').trim();
+  let binary: string;
+  try {
+    binary = atob(normalized);
+  } catch {
+    throw new Error(`Invalid ZATCA ${fieldName}: expected base64-encoded binary content`);
+  }
+
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function getConfiguredPublicKeyDerBytes(publicKeyBase64: string): number[] {
+  const publicKeyPem = normalizePublicKeyPem(publicKeyBase64);
+  const publicKeyBody = publicKeyPem
+    .replace(/-----BEGIN PUBLIC KEY-----/g, '')
+    .replace(/-----END PUBLIC KEY-----/g, '')
+    .replace(/\s+/g, '');
+
+  const publicKeyDer = decodeBase64BytesStrict(publicKeyBody, 'public key PEM body');
+  return Array.from(publicKeyDer);
 }
 
 export function createInvoice(params: InvoiceParams, config: ZatcaConfig): InvoiceResult {
@@ -141,50 +175,22 @@ export function createInvoice(params: InvoiceParams, config: ZatcaConfig): Invoi
   });
 
   try {
-    // Support certificate input as PEM text, base64 PEM, or layered base64 DER content.
-    const certificateCandidates = collectCertificateCandidates(config.certificate);
-    if (certificateCandidates.length === 0) {
-      throw new Error('Invalid ZATCA certificate format');
-    }
+    const certificateContent = normalizeCertificateContent(config.certificate);
+    const publicKeyPem = normalizePublicKeyPem(config.publicKey);
+    const privateKeyPem = normalizePrivateKeyPem(config.privateKey);
 
-    let certPem = '';
-    let certificateContent = '';
-    let certInfo: ReturnType<typeof getCertificateInfo> | null = null;
-    let certificateParseError: unknown = null;
-
-    for (const candidate of certificateCandidates) {
-      const candidatePem = buildCertificatePem(candidate);
-      try {
-        certInfo = getCertificateInfo(candidatePem);
-        certPem = candidatePem;
-        certificateContent = candidate;
-        break;
-      } catch (error) {
-        certificateParseError = error;
-        zatcaLogger.warn('Certificate candidate parse attempt failed', {
-          invoiceUUID,
-          candidateLength: candidate.length,
-        });
-      }
-    }
-
-    if (!certInfo) {
-      zatcaLogger.error('Certificate parsing failed', certificateParseError, {
-        invoiceUUID,
-        certificateCandidates: certificateCandidates.length,
-      });
-      throw certificateParseError instanceof Error
-        ? certificateParseError
-        : new Error('Failed to parse certificate from all candidates');
-    }
-
-    const privateKeyPem = normalizePrivateKey(config.privateKey);
+    const certPem = createPemBundle(
+      btoa(certificateContent),
+      btoa(publicKeyPem),
+      btoa(privateKeyPem),
+    );
+    const certInfo = getCertificateInfo(certPem);
+    const configuredPublicKeyBytes = getConfiguredPublicKeyDerBytes(config.publicKey);
 
     zatcaLogger.debug('ZATCA certificate/private key decoded', {
       invoiceUUID,
       certificateLength: certificateContent.length,
       privateKeyLength: privateKeyPem.length,
-      certificateCandidates: certificateCandidates.length,
     });
 
     // Compute totals (matching C# logic)
@@ -308,7 +314,7 @@ export function createInvoice(params: InvoiceParams, config: ZatcaConfig): Invoi
       tax.toFixed(2),
       invoiceHash.base64,
       signatureResult.signatureBase64,
-      certInfo.publicKeyBytes,
+      configuredPublicKeyBytes,
       certInfo.signatureBytes,
     );
 

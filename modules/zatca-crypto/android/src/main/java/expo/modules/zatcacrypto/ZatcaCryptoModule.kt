@@ -1,5 +1,6 @@
 package expo.modules.zatcacrypto
 
+import android.util.Log
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.ByteArrayInputStream
@@ -32,6 +33,10 @@ import org.w3c.dom.NodeList
 import org.xml.sax.InputSource
 
 class ZatcaCryptoModule : Module() {
+
+  companion object {
+    private const val TAG = "ZatcaCryptoModule"
+  }
 
   override fun definition() = ModuleDefinition {
     Name("ZatcaCryptoModule")
@@ -92,6 +97,11 @@ class ZatcaCryptoModule : Module() {
       val hexString = hashBytes.joinToString("") { "%02x".format(it) }
       val hexBytes = hexString.toByteArray(Charsets.UTF_8)
       android.util.Base64.encodeToString(hexBytes, android.util.Base64.NO_WRAP)
+    }
+
+    // MARK: createPemBundle
+    Function("createPemBundle") { certificate: String, publicKey: String, privateKey: String ->
+      createPemBundle(certificate, publicKey, privateKey)
     }
   }
 
@@ -185,7 +195,7 @@ class ZatcaCryptoModule : Module() {
   private fun loadECPrivateKey(pem: String): java.security.PrivateKey {
     val keyFactory = KeyFactory.getInstance("EC")
 
-    val normalizedPem = pem.trim()
+    val normalizedPem = normalizePrivateKeyInput(pem)
     val isSec1Pem = normalizedPem.contains("-----BEGIN EC PRIVATE KEY-----")
     val isPkcs8Pem = normalizedPem.contains("-----BEGIN PRIVATE KEY-----")
 
@@ -225,7 +235,11 @@ class ZatcaCryptoModule : Module() {
       .replace("\r", "")
       .trim()
 
-    val keyBytes = android.util.Base64.decode(stripped, android.util.Base64.DEFAULT)
+    val keyBytes = try {
+      android.util.Base64.decode(stripped, android.util.Base64.DEFAULT)
+    } catch (e: IllegalArgumentException) {
+      throw IllegalArgumentException("Invalid EC private key format: expected PEM, base64 PEM, or base64 DER", e)
+    }
     try {
       return loadPkcs8ECPrivateKey(keyBytes, keyFactory)
     } catch (pkcs8Error: Exception) {
@@ -240,6 +254,30 @@ class ZatcaCryptoModule : Module() {
     }
   }
 
+  private fun normalizePrivateKeyInput(rawValue: String): String {
+    val direct = normalizeEscapedNewlines(rawValue)
+    if (isEcPrivateKeyPem(direct)) {
+      return direct
+    }
+
+    val decodedText = decodeBase64Text(direct)?.trim()
+    if (decodedText != null && isEcPrivateKeyPem(decodedText)) {
+      return normalizeEscapedNewlines(decodedText)
+    }
+
+    val decodedTwiceText = decodedText?.let { decodeBase64Text(it)?.trim() }
+    if (decodedTwiceText != null && isEcPrivateKeyPem(decodedTwiceText)) {
+      return normalizeEscapedNewlines(decodedTwiceText)
+    }
+
+    // Fallback: keep compact base64/DER-like value for legacy callers.
+    return direct
+  }
+
+  private fun isEcPrivateKeyPem(value: String): Boolean {
+    return value.contains("-----BEGIN EC PRIVATE KEY-----") || value.contains("-----BEGIN PRIVATE KEY-----")
+  }
+
   private fun decodePemBody(pem: String, begin: String, end: String): ByteArray {
     val stripped = pem
       .replace(begin, "")
@@ -248,6 +286,52 @@ class ZatcaCryptoModule : Module() {
       .replace("\r", "")
       .trim()
     return android.util.Base64.decode(stripped, android.util.Base64.DEFAULT)
+  }
+
+  // --- C# parity: certificate.pem content ---
+
+  private fun createPemBundle(certificate: String, publicKey: String, privateKey: String): String {
+    val certificateContent = decodeUtf8FromBase64Strict(certificate, "certificate")
+    val publicKeyContent = decodeUtf8FromBase64Strict(publicKey, "public key")
+    val privateKeyContent = decodeUtf8FromBase64Strict(privateKey, "private key")
+
+    val certificateBody = extractCertificateBody(certificateContent)
+    val formattedCertificate = StringBuilder()
+    formattedCertificate.appendLine("-----BEGIN CERTIFICATE-----")
+
+    for (i in certificateBody.indices step 64) {
+      val end = minOf(i + 64, certificateBody.length)
+      formattedCertificate.appendLine(certificateBody.substring(i, end))
+    }
+
+    formattedCertificate.appendLine("-----END CERTIFICATE-----")
+    formattedCertificate.append(publicKeyContent)
+    formattedCertificate.append(privateKeyContent)
+    return formattedCertificate.toString()
+  }
+
+  private fun decodeUtf8FromBase64Strict(value: String, fieldName: String): String {
+    val normalized = normalizeEscapedNewlines(value).trim()
+    val decodedBytes = try {
+      android.util.Base64.decode(normalized, android.util.Base64.DEFAULT)
+    } catch (error: IllegalArgumentException) {
+      throw IllegalArgumentException(
+        "Invalid ZATCA $fieldName: expected base64-encoded UTF-8 content",
+        error,
+      )
+    }
+
+    return decodedBytes.toString(Charsets.UTF_8).trim()
+  }
+
+  private fun extractCertificateBody(value: String): String {
+    return normalizeEscapedNewlines(value)
+      .replace("-----BEGIN CERTIFICATE-----", "")
+      .replace("-----END CERTIFICATE-----", "")
+      .replace("\n", "")
+      .replace("\r", "")
+      .replace(" ", "")
+      .trim()
   }
 
   private fun loadPkcs8ECPrivateKey(pkcs8Bytes: ByteArray, keyFactory: KeyFactory): java.security.PrivateKey {
@@ -414,17 +498,305 @@ class ZatcaCryptoModule : Module() {
 
   // --- X509 Certificate Parsing ---
 
-  private fun parseCertificateInfo(certPem: String): Map<String, Any> {
-    val stripped = certPem
-      .replace("-----BEGIN CERTIFICATE-----", "")
-      .replace("-----END CERTIFICATE-----", "")
+  private fun bytePrefixHex(data: ByteArray, maxBytes: Int = 8): String {
+    val take = minOf(maxBytes, data.size)
+    if (take <= 0) return ""
+    return data.copyOfRange(0, take).joinToString(" ") { b -> "%02x".format(b) }
+  }
+
+  private fun textPrefix(value: String, maxLen: Int = 48): String {
+    return value
+      .replace("\n", "\\n")
+      .replace("\r", "\\r")
+      .take(maxLen)
+  }
+
+  private fun logCertDecode(stage: String, details: String) {
+    Log.d(TAG, "[CERT_DECODE] $stage | $details")
+  }
+
+  private fun decodeCertificateData(raw: String): ByteArray? {
+    val normalized = normalizeEscapedNewlines(raw)
+    logCertDecode(
+      stage = "input",
+      details = "rawLen=${raw.length}, normalizedLen=${normalized.length}, hasPem=${normalized.contains("BEGIN CERTIFICATE")}, prefix=${textPrefix(normalized)}",
+    )
+
+    val directPemBody = extractPemBody(
+      value = normalized,
+      begin = "-----BEGIN CERTIFICATE-----",
+      end = "-----END CERTIFICATE-----",
+    )
+    logCertDecode(
+      stage = "directPemBody",
+      details = "present=${directPemBody != null}, len=${directPemBody?.length ?: 0}",
+    )
+
+    if (directPemBody != null) {
+      val firstDecode = decodeBase64Lenient(directPemBody)
+      logCertDecode(
+        stage = "directPemBody.firstDecode",
+        details = "decoded=${firstDecode != null}, len=${firstDecode?.size ?: 0}, der=${firstDecode?.let { isLikelyDerCertificate(it) } ?: false}, prefixHex=${firstDecode?.let { bytePrefixHex(it) } ?: ""}",
+      )
+
+      if (firstDecode != null) {
+        if (isLikelyDerCertificate(firstDecode)) {
+          logCertDecode(stage = "directPemBody.firstDecode", details = "using direct DER bytes")
+          return firstDecode
+        }
+
+        val nestedText = firstDecode.toString(Charsets.UTF_8).trim()
+        logCertDecode(
+          stage = "directPemBody.nestedText",
+          details = "len=${nestedText.length}, hasPem=${nestedText.contains("BEGIN CERTIFICATE")}, prefix=${textPrefix(nestedText)}",
+        )
+
+        val nestedPemBody = extractPemBody(
+          value = nestedText,
+          begin = "-----BEGIN CERTIFICATE-----",
+          end = "-----END CERTIFICATE-----",
+        )
+        if (nestedPemBody != null) {
+          val nestedPemDer = decodeBase64Lenient(nestedPemBody)
+          logCertDecode(
+            stage = "directPemBody.nestedPemDer",
+            details = "decoded=${nestedPemDer != null}, len=${nestedPemDer?.size ?: 0}, der=${nestedPemDer?.let { isLikelyDerCertificate(it) } ?: false}, prefixHex=${nestedPemDer?.let { bytePrefixHex(it) } ?: ""}",
+          )
+
+          if (nestedPemDer != null && isLikelyDerCertificate(nestedPemDer)) {
+            logCertDecode(stage = "directPemBody.nestedPemDer", details = "using nested PEM DER bytes")
+            return nestedPemDer
+          }
+        }
+
+        val nestedDer = decodeBase64Lenient(nestedText)
+        logCertDecode(
+          stage = "directPemBody.nestedDer",
+          details = "decoded=${nestedDer != null}, len=${nestedDer?.size ?: 0}, der=${nestedDer?.let { isLikelyDerCertificate(it) } ?: false}, prefixHex=${nestedDer?.let { bytePrefixHex(it) } ?: ""}",
+        )
+
+        if (nestedDer != null && isLikelyDerCertificate(nestedDer)) {
+          logCertDecode(stage = "directPemBody.nestedDer", details = "using nested base64 DER bytes")
+          return nestedDer
+        }
+
+        logCertDecode(stage = "directPemBody", details = "falling back to firstDecode bytes (non-DER)")
+        return firstDecode
+      }
+    }
+
+    val decodedText = decodeBase64Text(normalized)
+    logCertDecode(
+      stage = "decodedText",
+      details = "decoded=${decodedText != null}, len=${decodedText?.length ?: 0}, hasPem=${decodedText?.contains("BEGIN CERTIFICATE") ?: false}, prefix=${decodedText?.let { textPrefix(it) } ?: ""}",
+    )
+
+    if (decodedText != null) {
+      val nestedPemBody = extractPemBody(
+        value = decodedText,
+        begin = "-----BEGIN CERTIFICATE-----",
+        end = "-----END CERTIFICATE-----",
+      )
+
+      if (nestedPemBody != null) {
+        val firstDecode = decodeBase64Lenient(nestedPemBody)
+        logCertDecode(
+          stage = "decodedText.firstDecode",
+          details = "decoded=${firstDecode != null}, len=${firstDecode?.size ?: 0}, der=${firstDecode?.let { isLikelyDerCertificate(it) } ?: false}, prefixHex=${firstDecode?.let { bytePrefixHex(it) } ?: ""}",
+        )
+
+        if (firstDecode != null) {
+          if (isLikelyDerCertificate(firstDecode)) {
+            logCertDecode(stage = "decodedText.firstDecode", details = "using direct DER bytes")
+            return firstDecode
+          }
+
+          val nestedText = firstDecode.toString(Charsets.UTF_8).trim()
+          logCertDecode(
+            stage = "decodedText.nestedText",
+            details = "len=${nestedText.length}, hasPem=${nestedText.contains("BEGIN CERTIFICATE")}, prefix=${textPrefix(nestedText)}",
+          )
+
+          val nestedPemBody2 = extractPemBody(
+            value = nestedText,
+            begin = "-----BEGIN CERTIFICATE-----",
+            end = "-----END CERTIFICATE-----",
+          )
+          if (nestedPemBody2 != null) {
+            val nestedPemDer2 = decodeBase64Lenient(nestedPemBody2)
+            logCertDecode(
+              stage = "decodedText.nestedPemDer2",
+              details = "decoded=${nestedPemDer2 != null}, len=${nestedPemDer2?.size ?: 0}, der=${nestedPemDer2?.let { isLikelyDerCertificate(it) } ?: false}, prefixHex=${nestedPemDer2?.let { bytePrefixHex(it) } ?: ""}",
+            )
+
+            if (nestedPemDer2 != null && isLikelyDerCertificate(nestedPemDer2)) {
+              logCertDecode(stage = "decodedText.nestedPemDer2", details = "using nested PEM DER bytes")
+              return nestedPemDer2
+            }
+          }
+
+          val nestedDer = decodeBase64Lenient(nestedText)
+          logCertDecode(
+            stage = "decodedText.nestedDer",
+            details = "decoded=${nestedDer != null}, len=${nestedDer?.size ?: 0}, der=${nestedDer?.let { isLikelyDerCertificate(it) } ?: false}, prefixHex=${nestedDer?.let { bytePrefixHex(it) } ?: ""}",
+          )
+
+          if (nestedDer != null && isLikelyDerCertificate(nestedDer)) {
+            logCertDecode(stage = "decodedText.nestedDer", details = "using nested base64 DER bytes")
+            return nestedDer
+          }
+
+          logCertDecode(stage = "decodedText", details = "falling back to firstDecode bytes (non-DER)")
+          return firstDecode
+        }
+      }
+    }
+
+    val compact = normalized
       .replace("\n", "")
       .replace("\r", "")
-      .trim()
+      .replace(" ", "")
 
-    val certBytes = android.util.Base64.decode(stripped, android.util.Base64.DEFAULT)
+    val firstDecode = decodeBase64Lenient(compact) ?: return null
+    logCertDecode(
+      stage = "compact.firstDecode",
+      details = "len=${firstDecode.size}, der=${isLikelyDerCertificate(firstDecode)}, prefixHex=${bytePrefixHex(firstDecode)}",
+    )
+
+    if (isLikelyDerCertificate(firstDecode)) {
+      logCertDecode(stage = "compact.firstDecode", details = "using compact DER bytes")
+      return firstDecode
+    }
+
+    val nestedText = firstDecode.toString(Charsets.UTF_8).trim()
+    val nestedPemBody = extractPemBody(
+      value = nestedText,
+      begin = "-----BEGIN CERTIFICATE-----",
+      end = "-----END CERTIFICATE-----",
+    )
+    if (nestedPemBody != null) {
+      val nestedPemDer = decodeBase64Lenient(nestedPemBody)
+      logCertDecode(
+        stage = "compact.nestedPemDer",
+        details = "decoded=${nestedPemDer != null}, len=${nestedPemDer?.size ?: 0}, der=${nestedPemDer?.let { isLikelyDerCertificate(it) } ?: false}, prefixHex=${nestedPemDer?.let { bytePrefixHex(it) } ?: ""}",
+      )
+
+      if (nestedPemDer != null && isLikelyDerCertificate(nestedPemDer)) {
+        logCertDecode(stage = "compact.nestedPemDer", details = "using nested PEM DER bytes")
+        return nestedPemDer
+      }
+    }
+
+    val secondDecode = decodeBase64Lenient(nestedText)
+    logCertDecode(
+      stage = "compact.secondDecode",
+      details = "decoded=${secondDecode != null}, len=${secondDecode?.size ?: 0}, der=${secondDecode?.let { isLikelyDerCertificate(it) } ?: false}, prefixHex=${secondDecode?.let { bytePrefixHex(it) } ?: ""}",
+    )
+
+    if (secondDecode != null && isLikelyDerCertificate(secondDecode)) {
+      logCertDecode(stage = "compact.secondDecode", details = "using second decode DER bytes")
+      return secondDecode
+    }
+
+    logCertDecode(stage = "fallback", details = "returning firstDecode non-DER bytes len=${firstDecode.size}")
+    return firstDecode
+  }
+
+  private fun decodeBase64Text(value: String): String? {
+    val decoded = decodeBase64Lenient(value) ?: return null
+    return decoded.toString(Charsets.UTF_8)
+  }
+
+  private fun decodeBase64Lenient(value: String): ByteArray? {
+    var sanitized = value
+      .replace("\n", "")
+      .replace("\r", "")
+      .replace("\t", "")
+      .replace(" ", "")
+      .replace("-", "+")
+      .replace("_", "/")
+      .filter { ch ->
+        ch.isLetterOrDigit() || ch == '+' || ch == '/' || ch == '='
+      }
+
+    if (sanitized.isEmpty()) {
+      return null
+    }
+
+    val remainder = sanitized.length % 4
+    if (remainder != 0) {
+      sanitized += "=".repeat(4 - remainder)
+    }
+
+    return try {
+      android.util.Base64.decode(sanitized, android.util.Base64.DEFAULT)
+    } catch (_: IllegalArgumentException) {
+      null
+    }
+  }
+
+  private fun isLikelyDerCertificate(data: ByteArray): Boolean {
+    if (data.size <= 64) return false
+
+    val first = data[0].toInt() and 0xFF
+    val second = data[1].toInt() and 0xFF
+
+    return first == 0x30 && (second == 0x81 || second == 0x82 || second < 0x80)
+  }
+
+  private fun normalizeEscapedNewlines(value: String): String {
+    return value
+      .replace("\\n", "\n")
+      .replace("\\r", "\r")
+      .trim()
+  }
+
+  private fun extractPemBody(value: String, begin: String, end: String): String? {
+    val beginIndex = value.indexOf(begin)
+    if (beginIndex < 0) {
+      return null
+    }
+
+    val contentStart = beginIndex + begin.length
+    val endIndex = value.indexOf(end, contentStart)
+    if (endIndex < 0) {
+      return null
+    }
+
+    val body = value
+      .substring(contentStart, endIndex)
+      .replace("\n", "")
+      .replace("\r", "")
+      .replace(" ", "")
+
+    return body.takeIf { it.isNotEmpty() }
+  }
+
+  private fun parseCertificateInfo(certPem: String): Map<String, Any> {
+    val certBytes = decodeCertificateData(certPem)
+      ?: throw IllegalArgumentException("Invalid base64 in certificate PEM")
+
+    logCertDecode(
+      stage = "parseCertificateInfo.inputBytes",
+      details = "len=${certBytes.size}, der=${isLikelyDerCertificate(certBytes)}, prefixHex=${bytePrefixHex(certBytes)}",
+    )
+
     val certFactory = CertificateFactory.getInstance("X.509")
-    val cert = certFactory.generateCertificate(ByteArrayInputStream(certBytes)) as X509Certificate
+    val cert = try {
+      certFactory.generateCertificate(ByteArrayInputStream(certBytes)) as X509Certificate
+    } catch (error: Exception) {
+      Log.e(
+        TAG,
+        "[CERT_DECODE] parseCertificateInfo.failure | len=${certBytes.size}, der=${isLikelyDerCertificate(certBytes)}, prefixHex=${bytePrefixHex(certBytes)}, msg=${error.message}",
+        error,
+      )
+      throw error
+    }
+
+    logCertDecode(
+      stage = "parseCertificateInfo.success",
+      details = "issuerLen=${cert.issuerDN.name.length}, serialLen=${cert.serialNumber.toString().length}",
+    )
 
     val issuer = cert.issuerDN.name
     val serialNumber = cert.serialNumber.toString()

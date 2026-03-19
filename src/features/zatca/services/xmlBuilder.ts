@@ -68,7 +68,8 @@ function escapeXml(s: string): string {
 }
 
 function formatDate(d: Date): string {
-  return d.toISOString().split('T')[0]; // yyyy-MM-dd
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
 function formatTime(d: Date): string {

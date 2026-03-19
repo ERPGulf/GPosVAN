@@ -25,6 +25,18 @@ export function getCertificateInfo(certPem: string): CertificateInfo {
   return ZatcaCrypto.parseCertificate(certPem);
 }
 
+/**
+ * Build one combined PEM string matching legacy C# CreatePEM behavior:
+ * CERTIFICATE block + public key text + private key text.
+ */
+export function createPemBundle(
+  certificate: string,
+  publicKey: string,
+  privateKey: string,
+): string {
+  return ZatcaCrypto.createPemBundle(certificate, publicKey, privateKey);
+}
+
 /** SHA-256 hash returning hex and base64 */
 export function sha256Hash(data: string): HashResult {
   return ZatcaCrypto.sha256Hash(data);
