@@ -161,6 +161,25 @@ function getConfiguredPublicKeyDerBytes(publicKeyBase64: string): number[] {
   return Array.from(publicKeyDer);
 }
 
+function countLines(value: string): number {
+  if (!value) return 0;
+  return value.split(/\r?\n/).length;
+}
+
+function summarizeBundle(value: string): Record<string, unknown> {
+  const lines = value.split(/\r?\n/).filter(Boolean);
+  return {
+    bundleLength: value.length,
+    bundleLineCount: countLines(value),
+    containsCertBlock: value.includes('BEGIN CERTIFICATE'),
+    containsPublicKeyBlock: value.includes('BEGIN PUBLIC KEY'),
+    containsPrivateKeyBlock:
+      value.includes('BEGIN EC PRIVATE KEY') || value.includes('BEGIN PRIVATE KEY'),
+    firstNonEmptyLine: lines[0] ?? null,
+    lastNonEmptyLine: lines[lines.length - 1] ?? null,
+  };
+}
+
 export function createInvoice(params: InvoiceParams, config: ZatcaConfig): InvoiceResult {
   const startedAt = Date.now();
   const invoiceUUID = params.invoiceUUID;
@@ -179,11 +198,30 @@ export function createInvoice(params: InvoiceParams, config: ZatcaConfig): Invoi
     const publicKeyPem = normalizePublicKeyPem(config.publicKey);
     const privateKeyPem = normalizePrivateKeyPem(config.privateKey);
 
+    zatcaLogger.debug('Normalized ZATCA signing material', {
+      invoiceUUID,
+      certBodyLength: certificateContent.length,
+      publicKeyLength: publicKeyPem.length,
+      signingKeyLength: privateKeyPem.length,
+      publicKeyLineCount: countLines(publicKeyPem),
+      signingKeyLineCount: countLines(privateKeyPem),
+      publicKeyHasHeader: publicKeyPem.includes('BEGIN PUBLIC KEY'),
+      signingKeyHasHeader:
+        privateKeyPem.includes('BEGIN EC PRIVATE KEY') ||
+        privateKeyPem.includes('BEGIN PRIVATE KEY'),
+    });
+
     const certPem = createPemBundle(
       btoa(certificateContent),
       btoa(publicKeyPem),
       btoa(privateKeyPem),
     );
+
+    zatcaLogger.debug('Combined signing bundle ready', {
+      invoiceUUID,
+      ...summarizeBundle(certPem),
+    });
+
     const certInfo = getCertificateInfo(certPem);
     const configuredPublicKeyBytes = getConfiguredPublicKeyDerBytes(config.publicKey);
 
