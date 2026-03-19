@@ -15,7 +15,41 @@ function toErrorMeta(error: unknown): Record<string, unknown> {
       stack: error.stack,
     };
   }
-  return { error };
+
+  if (typeof error === 'string') {
+    return {
+      name: 'NonErrorThrow',
+      message: error,
+      error,
+    };
+  }
+
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    const name = typeof record.name === 'string' ? record.name : 'NativeException';
+    const message =
+      typeof record.message === 'string'
+        ? record.message
+        : typeof record.localizedDescription === 'string'
+          ? record.localizedDescription
+          : JSON.stringify(record);
+
+    return {
+      name,
+      message,
+      code: record.code,
+      domain: record.domain,
+      nativeStackIOS: record.nativeStackIOS,
+      userInfo: record.userInfo,
+      error: record,
+    };
+  }
+
+  return {
+    name: 'UnknownThrow',
+    message: String(error),
+    error,
+  };
 }
 
 function sanitizeMeta(meta?: Record<string, unknown>): Record<string, unknown> | undefined {

@@ -98,7 +98,8 @@ public class ZatcaCryptoModule: Module {
     }
     defer { xmlFree(buf) }
 
-    guard let canonicalized = String(cString: buf, encoding: .utf8) else {
+    let canonicalizedData = Data(bytes: buf, count: Int(result))
+    guard let canonicalized = String(data: canonicalizedData, encoding: .utf8) else {
       throw NSError(domain: "ZatcaCrypto", code: 13, userInfo: [NSLocalizedDescriptionKey: "Failed to convert C14N output to string"])
     }
     return canonicalized
@@ -111,43 +112,73 @@ public class ZatcaCryptoModule: Module {
       throw NSError(domain: "ZatcaCrypto", code: 20, userInfo: [NSLocalizedDescriptionKey: "Invalid UTF-8 XML"])
     }
 
-    let doc = try XMLDocument(data: xmlData, options: [.nodePreserveWhitespace])
-    let root = doc.rootElement()
-
-    // Remove UBLExtensions
-    let ublExtNodes = try doc.nodes(forXPath: "//*[local-name()='UBLExtensions']")
-    for node in ublExtNodes {
-      node.detach()
+    let doc = xmlData.withUnsafeBytes { (rawBuffer: UnsafeRawBufferPointer) -> xmlDocPtr? in
+      let ptr = rawBuffer.baseAddress?.assumingMemoryBound(to: CChar.self)
+      return xmlParseMemory(ptr, Int32(rawBuffer.count))
     }
 
-    // Remove cac:Signature (direct child of Invoice)
-    let sigNodes = try doc.nodes(forXPath: "//*[local-name()='Invoice']/*[local-name()='Signature']")
-    for node in sigNodes {
-      node.detach()
+    guard let doc = doc else {
+      throw NSError(domain: "ZatcaCrypto", code: 21, userInfo: [NSLocalizedDescriptionKey: "Failed to parse XML for tag removal"])
+    }
+    defer { xmlFreeDoc(doc) }
+
+    try Self.removeNodes(matchingXPath: "//*[local-name()='UBLExtensions']", in: doc)
+    try Self.removeNodes(matchingXPath: "//*[local-name()='Invoice']/*[local-name()='Signature']", in: doc)
+    try Self.removeNodes(matchingXPath: "//*[local-name()='AdditionalDocumentReference'][*[local-name()='ID' and text()='QR']]", in: doc)
+
+    var outputBuf: UnsafeMutablePointer<xmlChar>? = nil
+    var outputLen: Int32 = 0
+    xmlDocDumpMemoryEnc(doc, &outputBuf, &outputLen, "UTF-8")
+
+    guard let buf = outputBuf, outputLen >= 0 else {
+      throw NSError(domain: "ZatcaCrypto", code: 22, userInfo: [NSLocalizedDescriptionKey: "Failed to serialize XML after tag removal"])
+    }
+    defer { xmlFree(buf) }
+
+    let outputData = Data(bytes: buf, count: Int(outputLen))
+    guard let output = String(data: outputData, encoding: .utf8) else {
+      throw NSError(domain: "ZatcaCrypto", code: 23, userInfo: [NSLocalizedDescriptionKey: "Failed to convert XML output to string"])
     }
 
-    // Remove AdditionalDocumentReference where ID = 'QR'
-    let qrNodes = try doc.nodes(forXPath: "//*[local-name()='AdditionalDocumentReference'][*[local-name()='ID' and text()='QR']]")
-    for node in qrNodes {
-      node.detach()
+    return output
+  }
+
+  private static func removeNodes(matchingXPath xpath: String, in doc: xmlDocPtr) throws {
+    guard let context = xmlXPathNewContext(doc) else {
+      throw NSError(domain: "ZatcaCrypto", code: 24, userInfo: [NSLocalizedDescriptionKey: "Failed to create XPath context"])
+    }
+    defer { xmlXPathFreeContext(context) }
+
+    let xpathObject: xmlXPathObjectPtr? = xpath.utf8CString.withUnsafeBufferPointer { buffer in
+      guard let baseAddress = buffer.baseAddress else { return nil }
+      let expression = UnsafeRawPointer(baseAddress).assumingMemoryBound(to: xmlChar.self)
+      return xmlXPathEvalExpression(expression, context)
     }
 
-    return doc.xmlString(options: [])
+    guard let xpathObject = xpathObject else {
+      throw NSError(domain: "ZatcaCrypto", code: 25, userInfo: [NSLocalizedDescriptionKey: "Invalid XPath expression: \(xpath)"])
+    }
+    defer { xmlXPathFreeObject(xpathObject) }
+
+    guard let nodeSet = xpathObject.pointee.nodesetval,
+          nodeSet.pointee.nodeNr > 0,
+          let nodeTab = nodeSet.pointee.nodeTab else {
+      return
+    }
+
+    let count = Int(nodeSet.pointee.nodeNr)
+    for index in stride(from: count - 1, through: 0, by: -1) {
+      if let node = nodeTab[index] {
+        xmlUnlinkNode(node)
+        xmlFreeNode(node)
+      }
+    }
   }
 
   // MARK: - EC Private Key Loading
 
   private static func loadECPrivateKey(pem: String) throws -> SecKey {
-    let stripped = pem
-      .replacingOccurrences(of: "-----BEGIN EC PRIVATE KEY-----", with: "")
-      .replacingOccurrences(of: "-----END EC PRIVATE KEY-----", with: "")
-      .replacingOccurrences(of: "-----BEGIN PRIVATE KEY-----", with: "")
-      .replacingOccurrences(of: "-----END PRIVATE KEY-----", with: "")
-      .replacingOccurrences(of: "\n", with: "")
-      .replacingOccurrences(of: "\r", with: "")
-      .trimmingCharacters(in: .whitespaces)
-
-    guard let keyData = Data(base64Encoded: stripped) else {
+    guard let keyData = decodePrivateKeyData(pem) else {
       throw NSError(domain: "ZatcaCrypto", code: 30, userInfo: [NSLocalizedDescriptionKey: "Invalid base64 in private key PEM"])
     }
 
@@ -165,17 +196,55 @@ public class ZatcaCryptoModule: Module {
     return privateKey
   }
 
+  private static func decodePrivateKeyData(_ raw: String) -> Data? {
+    let normalized = normalizeEscapedNewlines(raw)
+
+    if let pemBody = extractPemBody(
+      from: normalized,
+      begin: "-----BEGIN PRIVATE KEY-----",
+      end: "-----END PRIVATE KEY-----"
+    ) {
+      return decodeBase64Lenient(pemBody)
+    }
+
+    if let pemBody = extractPemBody(
+      from: normalized,
+      begin: "-----BEGIN EC PRIVATE KEY-----",
+      end: "-----END EC PRIVATE KEY-----"
+    ) {
+      return decodeBase64Lenient(pemBody)
+    }
+
+    if let decodedText = decodeBase64Text(normalized) {
+      if let pemBody = extractPemBody(
+        from: decodedText,
+        begin: "-----BEGIN PRIVATE KEY-----",
+        end: "-----END PRIVATE KEY-----"
+      ) {
+        return decodeBase64Lenient(pemBody)
+      }
+
+      if let pemBody = extractPemBody(
+        from: decodedText,
+        begin: "-----BEGIN EC PRIVATE KEY-----",
+        end: "-----END EC PRIVATE KEY-----"
+      ) {
+        return decodeBase64Lenient(pemBody)
+      }
+    }
+
+    let compact = normalized
+      .replacingOccurrences(of: "\n", with: "")
+      .replacingOccurrences(of: "\r", with: "")
+      .replacingOccurrences(of: " ", with: "")
+
+    return decodeBase64Lenient(compact)
+  }
+
   // MARK: - X509 Certificate Parsing
 
   private static func parseCertificateInfo(pem: String) throws -> [String: Any] {
-    let stripped = pem
-      .replacingOccurrences(of: "-----BEGIN CERTIFICATE-----", with: "")
-      .replacingOccurrences(of: "-----END CERTIFICATE-----", with: "")
-      .replacingOccurrences(of: "\n", with: "")
-      .replacingOccurrences(of: "\r", with: "")
-      .trimmingCharacters(in: .whitespaces)
-
-    guard let certData = Data(base64Encoded: stripped) else {
+    guard let certData = decodeCertificateData(pem) else {
       throw NSError(domain: "ZatcaCrypto", code: 40, userInfo: [NSLocalizedDescriptionKey: "Invalid base64 in certificate PEM"])
     }
 
@@ -212,6 +281,117 @@ public class ZatcaCryptoModule: Module {
       "publicKeyBytes": publicKeyBytes,
       "rawBase64": rawBase64,
     ]
+  }
+
+  private static func decodeCertificateData(_ raw: String) -> Data? {
+    let normalized = normalizeEscapedNewlines(raw)
+
+    if let certBody = extractPemBody(
+      from: normalized,
+      begin: "-----BEGIN CERTIFICATE-----",
+      end: "-----END CERTIFICATE-----"
+    ) {
+      return decodeBase64Lenient(certBody)
+    }
+
+    if let decodedText = decodeBase64Text(normalized),
+       let certBody = extractPemBody(
+         from: decodedText,
+         begin: "-----BEGIN CERTIFICATE-----",
+         end: "-----END CERTIFICATE-----"
+       ) {
+      return decodeBase64Lenient(certBody)
+    }
+
+    // Handle nested base64 payloads: base64(base64(DER-cert)).
+    if let decodedText = decodeBase64Text(normalized),
+       let nestedDer = decodeBase64Lenient(decodedText),
+       isLikelyDerCertificate(nestedDer) {
+      return nestedDer
+    }
+
+    let compact = normalized
+      .replacingOccurrences(of: "\n", with: "")
+      .replacingOccurrences(of: "\r", with: "")
+      .replacingOccurrences(of: " ", with: "")
+
+    guard let firstDecode = decodeBase64Lenient(compact) else {
+      return nil
+    }
+
+    if isLikelyDerCertificate(firstDecode) {
+      return firstDecode
+    }
+
+    // Final fallback for text-wrapped base64 DER.
+    if let nestedText = String(data: firstDecode, encoding: .utf8),
+       let secondDecode = decodeBase64Lenient(nestedText),
+       isLikelyDerCertificate(secondDecode) {
+      return secondDecode
+    }
+
+    return firstDecode
+  }
+
+  private static func decodeBase64Text(_ value: String) -> String? {
+    guard let data = decodeBase64Lenient(value) else {
+      return nil
+    }
+    return String(data: data, encoding: .utf8)
+  }
+
+  private static func decodeBase64Lenient(_ value: String) -> Data? {
+    var sanitized = value
+      .replacingOccurrences(of: "\n", with: "")
+      .replacingOccurrences(of: "\r", with: "")
+      .replacingOccurrences(of: "\t", with: "")
+      .replacingOccurrences(of: " ", with: "")
+      .replacingOccurrences(of: "-", with: "+")
+      .replacingOccurrences(of: "_", with: "/")
+
+    sanitized = sanitized.filter { char in
+      char.isASCII && (char.isLetter || char.isNumber || char == "+" || char == "/" || char == "=")
+    }
+
+    guard !sanitized.isEmpty else {
+      return nil
+    }
+
+    let remainder = sanitized.count % 4
+    if remainder != 0 {
+      sanitized += String(repeating: "=", count: 4 - remainder)
+    }
+
+    return Data(base64Encoded: sanitized, options: [.ignoreUnknownCharacters])
+  }
+
+  private static func isLikelyDerCertificate(_ data: Data) -> Bool {
+    // X.509 DER certificate starts with ASN.1 SEQUENCE (0x30).
+    guard data.count > 64 else { return false }
+    let bytes = [UInt8](data)
+    return bytes[0] == 0x30 && (bytes[1] == 0x81 || bytes[1] == 0x82 || bytes[1] < 0x80)
+  }
+
+  private static func normalizeEscapedNewlines(_ value: String) -> String {
+    return value
+      .replacingOccurrences(of: "\\n", with: "\n")
+      .replacingOccurrences(of: "\\r", with: "\r")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private static func extractPemBody(from value: String, begin: String, end: String) -> String? {
+    guard value.contains(begin), value.contains(end) else {
+      return nil
+    }
+
+    let body = value
+      .replacingOccurrences(of: begin, with: "")
+      .replacingOccurrences(of: end, with: "")
+      .replacingOccurrences(of: "\n", with: "")
+      .replacingOccurrences(of: "\r", with: "")
+      .replacingOccurrences(of: " ", with: "")
+
+    return body.isEmpty ? nil : body
   }
 
   // MARK: - Minimal ASN.1 DER Parser for X509

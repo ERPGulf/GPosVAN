@@ -37,12 +37,81 @@ function formatDateTime(d: Date): string {
   return `${date}T${time}`;
 }
 
-function decodeCertificateContent(base64Cert: string): string {
-  return atob(base64Cert);
+function tryBase64Decode(value: string): string | null {
+  let normalized = value.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+
+  if (!normalized) return null;
+
+  const remainder = normalized.length % 4;
+  if (remainder !== 0) {
+    normalized = normalized + '='.repeat(4 - remainder);
+  }
+
+  try {
+    return atob(normalized);
+  } catch {
+    return null;
+  }
 }
 
-function decodePrivateKey(base64Key: string): string {
-  return atob(base64Key);
+function stripWhitespace(value: string): string {
+  return value.replace(/\s+/g, '');
+}
+
+function extractCertificateBody(value: string): string {
+  return stripWhitespace(
+    value
+      .replace(/-----BEGIN CERTIFICATE-----/g, '')
+      .replace(/-----END CERTIFICATE-----/g, '')
+      .replace(/\\n/g, ''),
+  );
+}
+
+function looksLikeBase64(value: string): boolean {
+  const compact = stripWhitespace(value);
+  return compact.length > 0 && /^[A-Za-z0-9+/=]+$/.test(compact);
+}
+
+function collectCertificateCandidates(rawValue: string): string[] {
+  const direct = rawValue.trim();
+  const decoded = tryBase64Decode(direct)?.trim() ?? '';
+  const decodedTwice = decoded ? (tryBase64Decode(decoded)?.trim() ?? '') : '';
+
+  const directPem = direct.includes('BEGIN CERTIFICATE') ? extractCertificateBody(direct) : '';
+  const decodedPem = decoded.includes('BEGIN CERTIFICATE') ? extractCertificateBody(decoded) : '';
+  const decodedTwicePem = decodedTwice.includes('BEGIN CERTIFICATE')
+    ? extractCertificateBody(decodedTwice)
+    : '';
+
+  const candidates: string[] = [];
+
+  if (decodedTwicePem) candidates.push(decodedTwicePem);
+  if (decodedPem) candidates.push(decodedPem);
+  if (directPem) candidates.push(directPem);
+
+  if (looksLikeBase64(decodedTwice)) candidates.push(stripWhitespace(decodedTwice));
+  if (looksLikeBase64(decoded)) candidates.push(stripWhitespace(decoded));
+  if (looksLikeBase64(direct)) candidates.push(stripWhitespace(direct));
+
+  // Keep unique candidates and drop obviously invalid short payloads.
+  return Array.from(new Set(candidates)).filter((item) => item.length > 300);
+}
+
+function normalizePrivateKey(rawValue: string): string {
+  const direct = rawValue.trim();
+  if (direct.includes('BEGIN EC PRIVATE KEY') || direct.includes('BEGIN PRIVATE KEY')) {
+    return direct.replace(/\\n/g, '\n');
+  }
+
+  const decoded = tryBase64Decode(direct)?.trim();
+  if (
+    decoded &&
+    (decoded.includes('BEGIN EC PRIVATE KEY') || decoded.includes('BEGIN PRIVATE KEY'))
+  ) {
+    return decoded.replace(/\\n/g, '\n');
+  }
+
+  return direct;
 }
 
 function buildCertificatePem(certContent: string): string {
@@ -68,15 +137,50 @@ export function createInvoice(params: InvoiceParams, config: ZatcaConfig): Invoi
   });
 
   try {
-    // Decode certificate and keys from base64 config
-    const certificateContent = decodeCertificateContent(config.certificate);
-    const privateKeyPem = decodePrivateKey(config.privateKey);
-    const certPem = buildCertificatePem(certificateContent);
+    // Support certificate input as PEM text, base64 PEM, or layered base64 DER content.
+    const certificateCandidates = collectCertificateCandidates(config.certificate);
+    if (certificateCandidates.length === 0) {
+      throw new Error('Invalid ZATCA certificate format');
+    }
+
+    let certPem = '';
+    let certificateContent = '';
+    let certInfo: ReturnType<typeof getCertificateInfo> | null = null;
+    let certificateParseError: unknown = null;
+
+    for (const candidate of certificateCandidates) {
+      const candidatePem = buildCertificatePem(candidate);
+      try {
+        certInfo = getCertificateInfo(candidatePem);
+        certPem = candidatePem;
+        certificateContent = candidate;
+        break;
+      } catch (error) {
+        certificateParseError = error;
+        zatcaLogger.warn('Certificate candidate parse attempt failed', {
+          invoiceUUID,
+          candidateLength: candidate.length,
+        });
+      }
+    }
+
+    if (!certInfo) {
+      zatcaLogger.error('Certificate parsing failed', certificateParseError, {
+        invoiceUUID,
+        certificateCandidates: certificateCandidates.length,
+      });
+      throw certificateParseError instanceof Error
+        ? certificateParseError
+        : new Error('Failed to parse certificate from all candidates');
+    }
+
+    const privateKeyPem = normalizePrivateKey(config.privateKey);
 
     zatcaLogger.debug('ZATCA certificate/private key decoded', {
       invoiceUUID,
       certificateLength: certificateContent.length,
       privateKeyLength: privateKeyPem.length,
+      certificateCandidates: certificateCandidates.length,
     });
 
     // Compute totals (matching C# logic)
@@ -123,12 +227,22 @@ export function createInvoice(params: InvoiceParams, config: ZatcaConfig): Invoi
     // Step 2: Compute invoice hash (remove tags + C14N + SHA-256)
     const invoiceHash = generateInvoiceHash(baseXml);
 
-    // Step 3: Get certificate info and compute certificate digest
-    const certInfo = getCertificateInfo(certPem);
-    const certificateDigestValue = getDigestValue(certificateContent);
+    // Step 3: Compute certificate digest
+    let certificateDigestValue;
+    try {
+      certificateDigestValue = getDigestValue(certificateContent);
+    } catch (error) {
+      zatcaLogger.error('Certificate digest computation failed', error, {
+        invoiceUUID,
+        certContentLength: certificateContent.length,
+      });
+      throw error;
+    }
 
     zatcaLogger.info('Certificate info parsed', {
       invoiceUUID,
+      certPemLength: certPem.length,
+      certContentLength: certificateContent.length,
       issuer: certInfo.issuer,
       serialNumber: certInfo.serialNumber,
     });
@@ -143,7 +257,17 @@ export function createInvoice(params: InvoiceParams, config: ZatcaConfig): Invoi
     );
 
     // Step 5: Sign the invoice hash with ECDSA
-    const signatureResult = signHashWithECDSA(invoiceHash.hex, privateKeyPem);
+    let signatureResult;
+    try {
+      signatureResult = signHashWithECDSA(invoiceHash.hex, privateKeyPem);
+    } catch (error) {
+      zatcaLogger.error('ECDSA signing failed', error, {
+        invoiceUUID,
+        invoiceHashHexLength: invoiceHash.hex.length,
+        privateKeyLength: privateKeyPem.length,
+      });
+      throw error;
+    }
 
     zatcaLogger.info('Invoice hash signed', {
       invoiceUUID,
