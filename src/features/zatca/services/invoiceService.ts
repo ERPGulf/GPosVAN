@@ -29,6 +29,7 @@ import {
   insertUBLExtension,
   updateQRData,
 } from './xmlBuilder';
+import { zatcaLogger } from './zatcaLogger';
 
 function formatDateTime(d: Date): string {
   const date = d.toISOString().split('T')[0];
@@ -54,103 +55,160 @@ function buildCertificatePem(certContent: string): string {
 }
 
 export function createInvoice(params: InvoiceParams, config: ZatcaConfig): InvoiceResult {
+  const startedAt = Date.now();
   const invoiceUUID = params.invoiceUUID;
 
-  // Decode certificate and keys from base64 config
-  const certificateContent = decodeCertificateContent(config.certificate);
-  const privateKeyPem = decodePrivateKey(config.privateKey);
-  const certPem = buildCertificatePem(certificateContent);
-
-  // Compute totals (matching C# logic)
-  const cartItems = params.cartItems;
-  let totalExcludeTax = 0;
-  for (const item of cartItems) {
-    const itemPrice = item.product.uomPrice ?? item.product.price ?? 0;
-    if (config.isTaxIncludedInPrice) {
-      const priceWithoutTax = itemPrice / (1 + (item.product.taxPercentage ?? 15) / 100);
-      totalExcludeTax += priceWithoutTax * item.quantity;
-    } else {
-      totalExcludeTax += itemPrice * item.quantity;
-    }
-  }
-
-  // Step 1: Build base XML
-  const baseXml = buildBaseInvoiceXml({
+  zatcaLogger.info('Invoice generation started', {
+    invoiceUUID,
     invoiceNumber: params.invoiceNumber,
-    invoiceDate: params.invoiceDate,
-    uuid: invoiceUUID,
     invoiceTypeCode: params.invoiceTypeCode,
     invoiceSubType: params.invoiceSubType,
-    previousInvoiceHash: params.previousInvoiceHash,
-    customer: params.customer,
-    cartItems,
-    tax: params.tax,
-    totalExcludeTax,
-    discount: params.discount,
-    config,
+    itemCount: params.cartItems.length,
+    isTaxIncludedInPrice: config.isTaxIncludedInPrice,
   });
 
-  // Step 2: Compute invoice hash (remove tags + C14N + SHA-256)
-  const invoiceHash = generateInvoiceHash(baseXml);
+  try {
+    // Decode certificate and keys from base64 config
+    const certificateContent = decodeCertificateContent(config.certificate);
+    const privateKeyPem = decodePrivateKey(config.privateKey);
+    const certPem = buildCertificatePem(certificateContent);
 
-  // Step 3: Get certificate info and compute certificate digest
-  const certInfo = getCertificateInfo(certPem);
-  const certificateDigestValue = getDigestValue(certificateContent);
+    zatcaLogger.debug('ZATCA certificate/private key decoded', {
+      invoiceUUID,
+      certificateLength: certificateContent.length,
+      privateKeyLength: privateKeyPem.length,
+    });
 
-  // Step 4: Compute signed properties hash
-  const signingTime = formatDateTime(params.invoiceDate);
-  const signedPropertiesHash = generateSignedPropertiesHash(
-    signingTime,
-    certInfo.issuer,
-    certInfo.serialNumber,
-    certificateDigestValue,
-  );
+    // Compute totals (matching C# logic)
+    const cartItems = params.cartItems;
+    let totalExcludeTax = 0;
+    for (const item of cartItems) {
+      const itemPrice = item.product.uomPrice ?? item.product.price ?? 0;
+      if (config.isTaxIncludedInPrice) {
+        const priceWithoutTax = itemPrice / (1 + (item.product.taxPercentage ?? 15) / 100);
+        totalExcludeTax += priceWithoutTax * item.quantity;
+      } else {
+        totalExcludeTax += itemPrice * item.quantity;
+      }
+    }
 
-  // Step 5: Sign the invoice hash with ECDSA
-  const signatureResult = signHashWithECDSA(invoiceHash.hex, privateKeyPem);
+    zatcaLogger.info('Invoice totals computed', {
+      invoiceUUID,
+      totalExcludeTax: Number(totalExcludeTax.toFixed(2)),
+      tax: Number(params.tax.toFixed(2)),
+      discount: Number(params.discount.toFixed(2)),
+    });
 
-  // Step 6: Build and insert UBLExtension
-  const ublExtension = buildUBLExtension(
-    invoiceHash.base64,
-    signedPropertiesHash,
-    signatureResult.signatureBase64,
-    certificateContent,
-  );
-  let xml = insertUBLExtension(baseXml, ublExtension);
+    // Step 1: Build base XML
+    const baseXml = buildBaseInvoiceXml({
+      invoiceNumber: params.invoiceNumber,
+      invoiceDate: params.invoiceDate,
+      uuid: invoiceUUID,
+      invoiceTypeCode: params.invoiceTypeCode,
+      invoiceSubType: params.invoiceSubType,
+      previousInvoiceHash: params.previousInvoiceHash,
+      customer: params.customer,
+      cartItems,
+      tax: params.tax,
+      totalExcludeTax,
+      discount: params.discount,
+      config,
+    });
 
-  // Step 7: Insert ds:Object with signed properties
-  const signedPropertiesObject = buildSignedPropertiesObject(
-    signingTime,
-    certificateDigestValue,
-    certInfo.issuer,
-    certInfo.serialNumber,
-  );
-  xml = insertSignedPropertiesObject(xml, signedPropertiesObject);
+    zatcaLogger.debug('Base XML generated', {
+      invoiceUUID,
+      xmlLength: baseXml.length,
+    });
 
-  // Step 8: Compute QR data
-  const totalAmount = totalExcludeTax + params.tax;
-  const qrData = getQRString(
-    config.abbr,
-    config.taxId,
-    signingTime,
-    totalAmount.toFixed(2),
-    params.tax.toFixed(2),
-    invoiceHash.base64,
-    signatureResult.signatureBase64,
-    certInfo.publicKeyBytes,
-    certInfo.signatureBytes,
-  );
+    // Step 2: Compute invoice hash (remove tags + C14N + SHA-256)
+    const invoiceHash = generateInvoiceHash(baseXml);
 
-  // Step 9: Update QR placeholder in XML
-  xml = updateQRData(xml, qrData);
+    // Step 3: Get certificate info and compute certificate digest
+    const certInfo = getCertificateInfo(certPem);
+    const certificateDigestValue = getDigestValue(certificateContent);
 
-  // Step 10: Compute final hash for PIH (full canonical XML)
-  const finalCanonical = canonicalizeXml(xml);
-  const finalHash = computeHashBase64(finalCanonical);
+    zatcaLogger.info('Certificate info parsed', {
+      invoiceUUID,
+      issuer: certInfo.issuer,
+      serialNumber: certInfo.serialNumber,
+    });
 
-  return {
-    xml,
-    qrData,
-    invoiceHash: finalHash,
-  };
+    // Step 4: Compute signed properties hash
+    const signingTime = formatDateTime(params.invoiceDate);
+    const signedPropertiesHash = generateSignedPropertiesHash(
+      signingTime,
+      certInfo.issuer,
+      certInfo.serialNumber,
+      certificateDigestValue,
+    );
+
+    // Step 5: Sign the invoice hash with ECDSA
+    const signatureResult = signHashWithECDSA(invoiceHash.hex, privateKeyPem);
+
+    zatcaLogger.info('Invoice hash signed', {
+      invoiceUUID,
+      invoiceHashBase64Length: invoiceHash.base64.length,
+    });
+
+    // Step 6: Build and insert UBLExtension
+    const ublExtension = buildUBLExtension(
+      invoiceHash.base64,
+      signedPropertiesHash,
+      signatureResult.signatureBase64,
+      certificateContent,
+    );
+    let xml = insertUBLExtension(baseXml, ublExtension);
+
+    // Step 7: Insert ds:Object with signed properties
+    const signedPropertiesObject = buildSignedPropertiesObject(
+      signingTime,
+      certificateDigestValue,
+      certInfo.issuer,
+      certInfo.serialNumber,
+    );
+    xml = insertSignedPropertiesObject(xml, signedPropertiesObject);
+
+    // Step 8: Compute QR data
+    const totalAmount = totalExcludeTax + params.tax;
+    const qrData = getQRString(
+      config.abbr,
+      config.taxId,
+      signingTime,
+      totalAmount.toFixed(2),
+      params.tax.toFixed(2),
+      invoiceHash.base64,
+      signatureResult.signatureBase64,
+      certInfo.publicKeyBytes,
+      certInfo.signatureBytes,
+    );
+
+    // Step 9: Update QR placeholder in XML
+    xml = updateQRData(xml, qrData);
+
+    // Step 10: Compute final hash for PIH (full canonical XML)
+    const finalCanonical = canonicalizeXml(xml);
+    const finalHash = computeHashBase64(finalCanonical);
+
+    const durationMs = Date.now() - startedAt;
+    zatcaLogger.info('Invoice generation completed', {
+      invoiceUUID,
+      durationMs,
+      finalXmlLength: xml.length,
+      qrLength: qrData.length,
+      finalHashLength: finalHash.length,
+    });
+
+    return {
+      xml,
+      qrData,
+      invoiceHash: finalHash,
+    };
+  } catch (error) {
+    zatcaLogger.error('Invoice generation failed', error, {
+      invoiceUUID,
+      invoiceNumber: params.invoiceNumber,
+      itemCount: params.cartItems.length,
+    });
+    throw error;
+  }
 }

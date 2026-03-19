@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { createInvoice } from '../services/invoiceService';
+import { zatcaLogger } from '../services/zatcaLogger';
 import type { InvoiceParams, InvoiceResult, ZatcaConfig } from '../types';
 
 interface UseCreateInvoiceReturn {
@@ -15,15 +16,32 @@ export function useCreateInvoice(): UseCreateInvoiceReturn {
   const [isLoading, setIsLoading] = useState(false);
 
   const create = useCallback((params: InvoiceParams, config: ZatcaConfig): InvoiceResult | null => {
+    const startedAt = Date.now();
     setIsLoading(true);
     setError(null);
+
+    zatcaLogger.info('useCreateInvoice.create called', {
+      invoiceUUID: params.invoiceUUID,
+      invoiceNumber: params.invoiceNumber,
+      itemCount: params.cartItems.length,
+      isTaxIncludedInPrice: config.isTaxIncludedInPrice,
+    });
+
     try {
       const invoiceResult = createInvoice(params, config);
       setResult(invoiceResult);
+      zatcaLogger.info('useCreateInvoice.create succeeded', {
+        invoiceUUID: params.invoiceUUID,
+        durationMs: Date.now() - startedAt,
+      });
       return invoiceResult;
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Invoice creation failed';
       setError(message);
+      zatcaLogger.error('useCreateInvoice.create failed', e, {
+        invoiceUUID: params.invoiceUUID,
+        durationMs: Date.now() - startedAt,
+      });
       return null;
     } finally {
       setIsLoading(false);

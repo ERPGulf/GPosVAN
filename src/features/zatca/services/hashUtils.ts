@@ -1,4 +1,5 @@
 import ZatcaCrypto from '@/modules/zatca-crypto';
+import { zatcaLogger } from './zatcaLogger';
 
 /**
  * Generate the invoice hash:
@@ -9,8 +10,16 @@ import ZatcaCrypto from '@/modules/zatca-crypto';
  * Returns both hex and base64 representations.
  */
 export function generateInvoiceHash(xmlString: string): { hex: string; base64: string } {
+  zatcaLogger.debug('Generating invoice hash', {
+    inputXmlLength: xmlString.length,
+  });
   const canonicalXml = ZatcaCrypto.removeTagsAndCanonicalize(xmlString);
-  return ZatcaCrypto.sha256Hash(canonicalXml);
+  const hash = ZatcaCrypto.sha256Hash(canonicalXml);
+  zatcaLogger.debug('Invoice hash generated', {
+    canonicalXmlLength: canonicalXml.length,
+    hashBase64Length: hash.base64.length,
+  });
+  return hash;
 }
 
 /**
@@ -25,6 +34,12 @@ export function generateSignedPropertiesHash(
   serialNumber: string,
   encodedCertificateHash: string,
 ): string {
+  zatcaLogger.debug('Generating signed properties hash', {
+    signingTime,
+    issuerName,
+    serialNumber,
+  });
+
   const xmlTemplate =
     `<xades:SignedProperties xmlns:xades="http://uri.etsi.org/01903/v1.3.2#" Id="xadesSignedProperties">\n` +
     `                                    <xades:SignedSignatureProperties>\n` +
@@ -48,19 +63,36 @@ export function generateSignedPropertiesHash(
   const hashResult = ZatcaCrypto.sha256Hash(xmlTemplate);
   // The C# code takes the hex string, gets its UTF-8 bytes, then base64-encodes those
   // which is equivalent to base64(hexString) since hex is already ASCII/UTF-8
-  return btoa(hashResult.hex);
+  const signedPropertiesHash = btoa(hashResult.hex);
+  zatcaLogger.debug('Signed properties hash generated', {
+    hashLength: signedPropertiesHash.length,
+    encodedCertificateHashLength: encodedCertificateHash.length,
+  });
+  return signedPropertiesHash;
 }
 
 /**
  * Canonicalize a full XML string (C14N 1.1, no tag removal).
  */
 export function canonicalizeXml(xmlString: string): string {
-  return ZatcaCrypto.canonicalizeXml(xmlString);
+  zatcaLogger.debug('Canonicalizing XML', {
+    inputXmlLength: xmlString.length,
+  });
+  const canonical = ZatcaCrypto.canonicalizeXml(xmlString);
+  zatcaLogger.debug('XML canonicalized', {
+    canonicalXmlLength: canonical.length,
+  });
+  return canonical;
 }
 
 /**
  * Compute SHA-256 hash of a string, returning base64.
  */
 export function computeHashBase64(data: string): string {
-  return ZatcaCrypto.sha256Hash(data).base64;
+  const hash = ZatcaCrypto.sha256Hash(data).base64;
+  zatcaLogger.debug('SHA-256 hash computed', {
+    inputLength: data.length,
+    hashLength: hash.length,
+  });
+  return hash;
 }
