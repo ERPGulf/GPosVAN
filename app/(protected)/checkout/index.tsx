@@ -16,7 +16,7 @@ import {
   hydrateZatcaConfigFromStorage,
   setZatcaConfigFromBackend,
 } from '@/src/features/zatca/services/zatcaConfig';
-import { TEST_ZATCA_SETTINGS_PAYLOAD } from '@/src/features/zatca/services/zatcaTestPayload';
+import { getZatcaPayloadFromSecureStore } from '@/src/features/zatca/services/zatcaTestPayload';
 import type { InvoiceParams } from '@/src/features/zatca/types';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
@@ -123,7 +123,10 @@ export default function CheckoutPage() {
       }
       if (!zatcaConfig && __DEV__) {
         try {
-          zatcaConfig = await setZatcaConfigFromBackend(TEST_ZATCA_SETTINGS_PAYLOAD);
+          const payload = await getZatcaPayloadFromSecureStore();
+          if (payload) {
+            zatcaConfig = await setZatcaConfigFromBackend(payload);
+          }
         } catch {
           // Ignore and continue to user-facing error below.
         }
