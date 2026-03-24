@@ -5,6 +5,8 @@ import Security
 import libxml2
 
 public class ZatcaCryptoModule: Module {
+  private static let tag = "ZatcaCryptoModule"
+
   public func definition() -> ModuleDefinition {
     Name("ZatcaCryptoModule")
 
@@ -67,6 +69,11 @@ public class ZatcaCryptoModule: Module {
         throw NSError(domain: "ZatcaCrypto", code: 7, userInfo: [NSLocalizedDescriptionKey: "Failed to encode hex as UTF-8"])
       }
       return hexBytes.base64EncodedString()
+    }
+
+    // MARK: - createPemBundle
+    Function("createPemBundle") { (certificate: String, publicKey: String, privateKey: String) -> String in
+      return try Self.createPemBundle(certificate: certificate, publicKey: publicKey, privateKey: privateKey)
     }
   }
 
@@ -182,6 +189,10 @@ public class ZatcaCryptoModule: Module {
       throw NSError(domain: "ZatcaCrypto", code: 30, userInfo: [NSLocalizedDescriptionKey: "Invalid base64 in private key PEM"])
     }
 
+    // SecKeyCreateWithData for EC keys expects raw ANSI x9.63 key data.
+    // We need to extract the raw private scalar from PKCS#8 or SEC1 DER wrappers.
+    let rawKeyData = try Self.extractRawECPrivateKeyData(keyData)
+
     let attributes: [String: Any] = [
       kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
       kSecAttrKeyClass as String: kSecAttrKeyClassPrivate,
@@ -189,15 +200,181 @@ public class ZatcaCryptoModule: Module {
     ]
 
     var error: Unmanaged<CFError>?
-    guard let privateKey = SecKeyCreateWithData(keyData as CFData, attributes as CFDictionary, &error) else {
+    guard let privateKey = SecKeyCreateWithData(rawKeyData as CFData, attributes as CFDictionary, &error) else {
       let err = error?.takeRetainedValue()
       throw NSError(domain: "ZatcaCrypto", code: 31, userInfo: [NSLocalizedDescriptionKey: "Failed to create EC private key: \(err?.localizedDescription ?? "unknown")"])
     }
     return privateKey
   }
 
+  /// Extract raw EC private key bytes from PKCS#8 or SEC1 DER structures.
+  /// SecKeyCreateWithData expects ANSI x9.63 format for EC keys.
+  /// For a private-only key, that is just the raw 32-byte scalar.
+  /// If a public key point is present in the SEC1 structure, we include it
+  /// in x9.63 format: 04 || X || Y || D (65 + 32 = 97 bytes).
+  private static func extractRawECPrivateKeyData(_ data: Data) throws -> Data {
+    let bytes = [UInt8](data)
+
+    // If it's already 32 bytes (raw scalar) or 97 bytes (x9.63 with public key), use directly
+    if bytes.count == 32 || bytes.count == 97 {
+      return data
+    }
+
+    // Try to detect if this is PKCS#8 or SEC1 by looking at ASN.1 structure
+    guard bytes.count > 2, bytes[0] == 0x30 else {
+      // Not an ASN.1 SEQUENCE; try passing raw bytes as-is
+      return data
+    }
+
+    // Try PKCS#8 first (PrivateKeyInfo ::= SEQUENCE { version, algorithm, privateKey })
+    if let sec1Bytes = try? Self.unwrapPkcs8ToSec1(bytes) {
+      return try Self.extractSec1PrivateKey(sec1Bytes)
+    }
+
+    // Try SEC1 directly (ECPrivateKey ::= SEQUENCE { version, privateKey, ... })
+    if let result = try? Self.extractSec1PrivateKey(bytes) {
+      return result
+    }
+
+    // Fallback: return as-is and let SecKeyCreateWithData attempt to handle it
+    return data
+  }
+
+  /// Unwrap PKCS#8 PrivateKeyInfo to get the inner SEC1 ECPrivateKey bytes.
+  /// PKCS#8: SEQUENCE { INTEGER (version), SEQUENCE (algorithm), OCTET STRING (privateKey) }
+  private static func unwrapPkcs8ToSec1(_ bytes: [UInt8]) throws -> [UInt8] {
+    var offset = 0
+
+    // Outer SEQUENCE
+    guard bytes[offset] == 0x30 else {
+      throw NSError(domain: "ZatcaCrypto", code: 33, userInfo: [NSLocalizedDescriptionKey: "PKCS#8: expected SEQUENCE"])
+    }
+    let (_, seqContentStart) = try Self.readLength(bytes, offset: offset + 1)
+    offset = seqContentStart
+
+    // Version INTEGER
+    guard offset < bytes.count, bytes[offset] == 0x02 else {
+      throw NSError(domain: "ZatcaCrypto", code: 33, userInfo: [NSLocalizedDescriptionKey: "PKCS#8: expected version INTEGER"])
+    }
+    let (verLen, verContentStart) = try Self.readLength(bytes, offset: offset + 1)
+    offset = verContentStart + verLen
+
+    // AlgorithmIdentifier SEQUENCE
+    guard offset < bytes.count, bytes[offset] == 0x30 else {
+      throw NSError(domain: "ZatcaCrypto", code: 33, userInfo: [NSLocalizedDescriptionKey: "PKCS#8: expected AlgorithmIdentifier SEQUENCE"])
+    }
+    let (algLen, algContentStart) = try Self.readLength(bytes, offset: offset + 1)
+    offset = algContentStart + algLen
+
+    // PrivateKey OCTET STRING (contains the SEC1 ECPrivateKey)
+    guard offset < bytes.count, bytes[offset] == 0x04 else {
+      throw NSError(domain: "ZatcaCrypto", code: 33, userInfo: [NSLocalizedDescriptionKey: "PKCS#8: expected privateKey OCTET STRING"])
+    }
+    let (pkLen, pkContentStart) = try Self.readLength(bytes, offset: offset + 1)
+    let pkEnd = pkContentStart + pkLen
+
+    guard pkEnd <= bytes.count else {
+      throw NSError(domain: "ZatcaCrypto", code: 33, userInfo: [NSLocalizedDescriptionKey: "PKCS#8: truncated privateKey"])
+    }
+
+    return Array(bytes[pkContentStart..<pkEnd])
+  }
+
+  /// Extract raw EC private key data from SEC1 ECPrivateKey DER structure.
+  /// ECPrivateKey ::= SEQUENCE { version INTEGER, privateKey OCTET STRING, [0] parameters, [1] publicKey }
+  /// Returns either the 32-byte scalar or 97-byte x9.63 (04 || pubX || pubY || privD) format.
+  private static func extractSec1PrivateKey(_ bytes: [UInt8]) throws -> Data {
+    var offset = 0
+
+    // Outer SEQUENCE
+    guard bytes[offset] == 0x30 else {
+      throw NSError(domain: "ZatcaCrypto", code: 34, userInfo: [NSLocalizedDescriptionKey: "SEC1: expected SEQUENCE"])
+    }
+    let (seqLen, seqContentStart) = try Self.readLength(bytes, offset: offset + 1)
+    let seqEnd = seqContentStart + seqLen
+    offset = seqContentStart
+
+    // Version INTEGER
+    guard offset < seqEnd, bytes[offset] == 0x02 else {
+      throw NSError(domain: "ZatcaCrypto", code: 34, userInfo: [NSLocalizedDescriptionKey: "SEC1: expected version INTEGER"])
+    }
+    let (verLen, verContentStart) = try Self.readLength(bytes, offset: offset + 1)
+    offset = verContentStart + verLen
+
+    // Private key OCTET STRING
+    guard offset < seqEnd, bytes[offset] == 0x04 else {
+      throw NSError(domain: "ZatcaCrypto", code: 34, userInfo: [NSLocalizedDescriptionKey: "SEC1: expected privateKey OCTET STRING"])
+    }
+    let (pkLen, pkContentStart) = try Self.readLength(bytes, offset: offset + 1)
+    let pkEnd = pkContentStart + pkLen
+    guard pkEnd <= bytes.count else {
+      throw NSError(domain: "ZatcaCrypto", code: 34, userInfo: [NSLocalizedDescriptionKey: "SEC1: truncated private key"])
+    }
+
+    let privateScalar = Array(bytes[pkContentStart..<pkEnd])
+    offset = pkEnd
+
+    // Look for optional [1] public key (tag 0xA1)
+    var publicKeyPoint: [UInt8]? = nil
+    while offset < seqEnd {
+      let tag = bytes[offset]
+      offset += 1
+      let (len, contentStart) = try Self.readLength(bytes, offset: offset)
+      let contentEnd = contentStart + len
+
+      if tag == 0xA1, contentStart < contentEnd {
+        // Public key is a BIT STRING inside the [1] context tag
+        if bytes[contentStart] == 0x03 { // BIT STRING
+          let (bsLen, bsContentStart) = try Self.readLength(bytes, offset: contentStart + 1)
+          // Skip the "unused bits" byte (first byte of BIT STRING content)
+          if bsContentStart + 1 < contentStart + 1 + bsLen {
+            publicKeyPoint = Array(bytes[(bsContentStart + 1)..<(bsContentStart + bsLen)])
+          }
+        }
+      }
+
+      offset = contentEnd
+    }
+
+    // If we have the public key point (65 bytes: 04 || X || Y), build x9.63 format
+    if let pubKey = publicKeyPoint, pubKey.count == 65, pubKey[0] == 0x04 {
+      // x9.63 private key: 04 || X (32) || Y (32) || D (32) = 97 bytes
+      var x963 = Data(pubKey)       // 04 || X || Y (65 bytes)
+      x963.append(contentsOf: privateScalar)  // D (32 bytes)
+      return x963
+    }
+
+    // No public key available; just return the raw scalar
+    return Data(privateScalar)
+  }
+
+  private static func normalizePrivateKeyInput(_ rawValue: String) -> String {
+    let direct = normalizeEscapedNewlines(rawValue)
+    if isEcPrivateKeyPem(direct) {
+      return direct
+    }
+
+    let decodedText = decodeBase64Text(direct)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let decodedText, isEcPrivateKeyPem(decodedText) {
+      return normalizeEscapedNewlines(decodedText)
+    }
+
+    let decodedTwiceText = decodedText
+      .flatMap { decodeBase64Text($0) }
+      .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+    if let decodedTwiceText, isEcPrivateKeyPem(decodedTwiceText) {
+      return normalizeEscapedNewlines(decodedTwiceText)
+    }
+
+    return direct
+  }
+
+  private static func isEcPrivateKeyPem(_ value: String) -> Bool {
+    return value.contains("-----BEGIN EC PRIVATE KEY-----") || value.contains("-----BEGIN PRIVATE KEY-----")
+  }
+
   private static func decodePrivateKeyData(_ raw: String) -> Data? {
-    let normalized = normalizeEscapedNewlines(raw)
+    let normalized = normalizePrivateKeyInput(raw)
 
     if let pemBody = extractPemBody(
       from: normalized,
@@ -241,6 +418,51 @@ public class ZatcaCryptoModule: Module {
     return decodeBase64Lenient(compact)
   }
 
+  // MARK: - C# parity: certificate.pem content
+
+  private static func createPemBundle(certificate: String, publicKey: String, privateKey: String) throws -> String {
+    let certificateContent = try decodeUtf8FromBase64Strict(certificate, fieldName: "certificate")
+    let publicKeyContent = try decodeUtf8FromBase64Strict(publicKey, fieldName: "public key")
+    let privateKeyContent = try decodeUtf8FromBase64Strict(privateKey, fieldName: "private key")
+
+    let certificateBody = extractCertificateBody(certificateContent)
+    var lines: [String] = ["-----BEGIN CERTIFICATE-----"]
+
+    var start = certificateBody.startIndex
+    while start < certificateBody.endIndex {
+      let end = certificateBody.index(start, offsetBy: 64, limitedBy: certificateBody.endIndex) ?? certificateBody.endIndex
+      lines.append(String(certificateBody[start..<end]))
+      start = end
+    }
+
+    lines.append("-----END CERTIFICATE-----")
+    return lines.joined(separator: "\n") + "\n" + publicKeyContent + privateKeyContent
+  }
+
+  private static func decodeUtf8FromBase64Strict(_ value: String, fieldName: String) throws -> String {
+    let normalized = normalizeEscapedNewlines(value).trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let decodedBytes = Data(base64Encoded: normalized),
+          let decoded = String(data: decodedBytes, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) else {
+      throw NSError(
+        domain: "ZatcaCrypto",
+        code: 32,
+        userInfo: [NSLocalizedDescriptionKey: "Invalid ZATCA \(fieldName): expected base64-encoded UTF-8 content"]
+      )
+    }
+
+    return decoded
+  }
+
+  private static func extractCertificateBody(_ value: String) -> String {
+    return normalizeEscapedNewlines(value)
+      .replacingOccurrences(of: "-----BEGIN CERTIFICATE-----", with: "")
+      .replacingOccurrences(of: "-----END CERTIFICATE-----", with: "")
+      .replacingOccurrences(of: "\n", with: "")
+      .replacingOccurrences(of: "\r", with: "")
+      .replacingOccurrences(of: " ", with: "")
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
   // MARK: - X509 Certificate Parsing
 
   private static func parseCertificateInfo(pem: String) throws -> [String: Any] {
@@ -248,15 +470,21 @@ public class ZatcaCryptoModule: Module {
       throw NSError(domain: "ZatcaCrypto", code: 40, userInfo: [NSLocalizedDescriptionKey: "Invalid base64 in certificate PEM"])
     }
 
+    logCertDecode(
+      stage: "parseCertificateInfo.inputBytes",
+      details: "len=\(certData.count), der=\(isLikelyDerCertificate(certData)), prefixHex=\(bytePrefixHex(certData))"
+    )
+
     guard let secCert = SecCertificateCreateWithData(nil, certData as CFData) else {
+      logCertDecode(
+        stage: "parseCertificateInfo.failure",
+        details: "len=\(certData.count), der=\(isLikelyDerCertificate(certData)), prefixHex=\(bytePrefixHex(certData)), msg=Failed to create SecCertificate"
+      )
       throw NSError(domain: "ZatcaCrypto", code: 41, userInfo: [NSLocalizedDescriptionKey: "Failed to create SecCertificate"])
     }
 
     // Raw DER data base64
     let rawBase64 = certData.base64EncodedString()
-
-    // Extract summary (common name)
-    let summary = SecCertificateCopySubjectSummary(secCert) as String? ?? ""
 
     // Parse the DER structure for issuer, serial number, and signature
     let parsed = try Self.parseDER(certData)
@@ -272,6 +500,11 @@ public class ZatcaCryptoModule: Module {
       }
     }
 
+    logCertDecode(
+      stage: "parseCertificateInfo.success",
+      details: "issuerLen=\(parsed.issuer.count), serialLen=\(parsed.serialNumber.count)"
+    )
+
     return [
       "issuer": parsed.issuer,
       "serialNumber": parsed.serialNumber,
@@ -286,38 +519,139 @@ public class ZatcaCryptoModule: Module {
   private static func decodeCertificateData(_ raw: String) -> Data? {
     let normalized = normalizeEscapedNewlines(raw)
 
-    if let certBody = extractPemBody(
+    logCertDecode(
+      stage: "input",
+      details: "rawLen=\(raw.count), normalizedLen=\(normalized.count), hasPem=\(normalized.contains(\"BEGIN CERTIFICATE\")), prefix=\(textPrefix(normalized))"
+    )
+
+    let directPemBody = extractPemBody(
       from: normalized,
       begin: "-----BEGIN CERTIFICATE-----",
       end: "-----END CERTIFICATE-----"
-    ), let decoded = decodeBase64Lenient(certBody) {
-      if isLikelyDerCertificate(decoded) {
-        return decoded
+    )
+    logCertDecode(
+      stage: "directPemBody",
+      details: "present=\(directPemBody != nil), len=\(directPemBody?.count ?? 0)"
+    )
+
+    if let directPemBody {
+      let firstDecode = decodeBase64Lenient(directPemBody)
+      logCertDecode(
+        stage: "directPemBody.firstDecode",
+        details: "decoded=\(firstDecode != nil), len=\(firstDecode?.count ?? 0), der=\(firstDecode.map(isLikelyDerCertificate) ?? false), prefixHex=\(firstDecode.map(bytePrefixHex) ?? \"\")"
+      )
+
+      if let firstDecode {
+        if isLikelyDerCertificate(firstDecode) {
+          logCertDecode(stage: "directPemBody.firstDecode", details: "using direct DER bytes")
+          return firstDecode
+        }
+
+        let nestedText = String(data: firstDecode, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        logCertDecode(
+          stage: "directPemBody.nestedText",
+          details: "len=\(nestedText.count), hasPem=\(nestedText.contains(\"BEGIN CERTIFICATE\")), prefix=\(textPrefix(nestedText))"
+        )
+
+        let nestedPemBody = extractPemBody(
+          from: nestedText,
+          begin: "-----BEGIN CERTIFICATE-----",
+          end: "-----END CERTIFICATE-----"
+        )
+        if let nestedPemBody {
+          let nestedPemDer = decodeBase64Lenient(nestedPemBody)
+          logCertDecode(
+            stage: "directPemBody.nestedPemDer",
+            details: "decoded=\(nestedPemDer != nil), len=\(nestedPemDer?.count ?? 0), der=\(nestedPemDer.map(isLikelyDerCertificate) ?? false), prefixHex=\(nestedPemDer.map(bytePrefixHex) ?? \"\")"
+          )
+
+          if let nestedPemDer, isLikelyDerCertificate(nestedPemDer) {
+            logCertDecode(stage: "directPemBody.nestedPemDer", details: "using nested PEM DER bytes")
+            return nestedPemDer
+          }
+        }
+
+        let nestedDer = decodeBase64Lenient(nestedText)
+        logCertDecode(
+          stage: "directPemBody.nestedDer",
+          details: "decoded=\(nestedDer != nil), len=\(nestedDer?.count ?? 0), der=\(nestedDer.map(isLikelyDerCertificate) ?? false), prefixHex=\(nestedDer.map(bytePrefixHex) ?? \"\")"
+        )
+
+        if let nestedDer, isLikelyDerCertificate(nestedDer) {
+          logCertDecode(stage: "directPemBody.nestedDer", details: "using nested base64 DER bytes")
+          return nestedDer
+        }
+
+        logCertDecode(stage: "directPemBody", details: "falling back to firstDecode bytes (non-DER)")
+        return firstDecode
       }
-      // PEM body decoded to non-DER — likely nested base64 (base64(base64(DER))).
-      if let nestedText = String(data: decoded, encoding: .utf8),
-         let nestedDer = decodeBase64Lenient(nestedText),
-         isLikelyDerCertificate(nestedDer) {
-        return nestedDer
-      }
-      return decoded
     }
 
-    if let decodedText = decodeBase64Text(normalized),
-       let certBody = extractPemBody(
-         from: decodedText,
-         begin: "-----BEGIN CERTIFICATE-----",
-         end: "-----END CERTIFICATE-----"
-       ), let decoded = decodeBase64Lenient(certBody) {
-      if isLikelyDerCertificate(decoded) {
-        return decoded
+    let decodedText = decodeBase64Text(normalized)
+    logCertDecode(
+      stage: "decodedText",
+      details: "decoded=\(decodedText != nil), len=\(decodedText?.count ?? 0), hasPem=\(decodedText?.contains(\"BEGIN CERTIFICATE\") ?? false), prefix=\(decodedText.map(textPrefix) ?? \"\")"
+    )
+
+    if let decodedText {
+      let nestedPemBody = extractPemBody(
+        from: decodedText,
+        begin: "-----BEGIN CERTIFICATE-----",
+        end: "-----END CERTIFICATE-----"
+      )
+
+      if let nestedPemBody {
+        let firstDecode = decodeBase64Lenient(nestedPemBody)
+        logCertDecode(
+          stage: "decodedText.firstDecode",
+          details: "decoded=\(firstDecode != nil), len=\(firstDecode?.count ?? 0), der=\(firstDecode.map(isLikelyDerCertificate) ?? false), prefixHex=\(firstDecode.map(bytePrefixHex) ?? \"\")"
+        )
+
+        if let firstDecode {
+          if isLikelyDerCertificate(firstDecode) {
+            logCertDecode(stage: "decodedText.firstDecode", details: "using direct DER bytes")
+            return firstDecode
+          }
+
+          let nestedText = String(data: firstDecode, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+          logCertDecode(
+            stage: "decodedText.nestedText",
+            details: "len=\(nestedText.count), hasPem=\(nestedText.contains(\"BEGIN CERTIFICATE\")), prefix=\(textPrefix(nestedText))"
+          )
+
+          let nestedPemBody2 = extractPemBody(
+            from: nestedText,
+            begin: "-----BEGIN CERTIFICATE-----",
+            end: "-----END CERTIFICATE-----"
+          )
+          if let nestedPemBody2 {
+            let nestedPemDer2 = decodeBase64Lenient(nestedPemBody2)
+            logCertDecode(
+              stage: "decodedText.nestedPemDer2",
+              details: "decoded=\(nestedPemDer2 != nil), len=\(nestedPemDer2?.count ?? 0), der=\(nestedPemDer2.map(isLikelyDerCertificate) ?? false), prefixHex=\(nestedPemDer2.map(bytePrefixHex) ?? \"\")"
+            )
+
+            if let nestedPemDer2, isLikelyDerCertificate(nestedPemDer2) {
+              logCertDecode(stage: "decodedText.nestedPemDer2", details: "using nested PEM DER bytes")
+              return nestedPemDer2
+            }
+          }
+
+          let nestedDer = decodeBase64Lenient(nestedText)
+          logCertDecode(
+            stage: "decodedText.nestedDer",
+            details: "decoded=\(nestedDer != nil), len=\(nestedDer?.count ?? 0), der=\(nestedDer.map(isLikelyDerCertificate) ?? false), prefixHex=\(nestedDer.map(bytePrefixHex) ?? \"\")"
+          )
+
+          if let nestedDer, isLikelyDerCertificate(nestedDer) {
+            logCertDecode(stage: "decodedText.nestedDer", details: "using nested base64 DER bytes")
+            return nestedDer
+          }
+
+          logCertDecode(stage: "decodedText", details: "falling back to firstDecode bytes (non-DER)")
+          return firstDecode
+        }
       }
-      if let nestedText = String(data: decoded, encoding: .utf8),
-         let nestedDer = decodeBase64Lenient(nestedText),
-         isLikelyDerCertificate(nestedDer) {
-        return nestedDer
-      }
-      return decoded
     }
 
     let compact = normalized
@@ -329,17 +663,47 @@ public class ZatcaCryptoModule: Module {
       return nil
     }
 
+    logCertDecode(
+      stage: "compact.firstDecode",
+      details: "len=\(firstDecode.count), der=\(isLikelyDerCertificate(firstDecode)), prefixHex=\(bytePrefixHex(firstDecode))"
+    )
+
     if isLikelyDerCertificate(firstDecode) {
+      logCertDecode(stage: "compact.firstDecode", details: "using compact DER bytes")
       return firstDecode
     }
 
-    // Fallback for nested base64 without PEM headers.
-    if let nestedText = String(data: firstDecode, encoding: .utf8),
-       let secondDecode = decodeBase64Lenient(nestedText),
-       isLikelyDerCertificate(secondDecode) {
+    let nestedText = String(data: firstDecode, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let nestedPemBody = extractPemBody(
+      from: nestedText,
+      begin: "-----BEGIN CERTIFICATE-----",
+      end: "-----END CERTIFICATE-----"
+    )
+    if let nestedPemBody {
+      let nestedPemDer = decodeBase64Lenient(nestedPemBody)
+      logCertDecode(
+        stage: "compact.nestedPemDer",
+        details: "decoded=\(nestedPemDer != nil), len=\(nestedPemDer?.count ?? 0), der=\(nestedPemDer.map(isLikelyDerCertificate) ?? false), prefixHex=\(nestedPemDer.map(bytePrefixHex) ?? \"\")"
+      )
+
+      if let nestedPemDer, isLikelyDerCertificate(nestedPemDer) {
+        logCertDecode(stage: "compact.nestedPemDer", details: "using nested PEM DER bytes")
+        return nestedPemDer
+      }
+    }
+
+    let secondDecode = decodeBase64Lenient(nestedText)
+    logCertDecode(
+      stage: "compact.secondDecode",
+      details: "decoded=\(secondDecode != nil), len=\(secondDecode?.count ?? 0), der=\(secondDecode.map(isLikelyDerCertificate) ?? false), prefixHex=\(secondDecode.map(bytePrefixHex) ?? \"\")"
+    )
+
+    if let secondDecode, isLikelyDerCertificate(secondDecode) {
+      logCertDecode(stage: "compact.secondDecode", details: "using second decode DER bytes")
       return secondDecode
     }
 
+    logCertDecode(stage: "fallback", details: "returning firstDecode non-DER bytes len=\(firstDecode.count)")
     return firstDecode
   }
 
@@ -382,6 +746,24 @@ public class ZatcaCryptoModule: Module {
     return bytes[0] == 0x30 && (bytes[1] == 0x81 || bytes[1] == 0x82 || bytes[1] < 0x80)
   }
 
+  private static func bytePrefixHex(_ data: Data, maxBytes: Int = 8) -> String {
+    let bytes = [UInt8](data.prefix(maxBytes))
+    guard !bytes.isEmpty else { return "" }
+    return bytes.map { String(format: "%02x", $0) }.joined(separator: " ")
+  }
+
+  private static func textPrefix(_ value: String, maxLen: Int = 48) -> String {
+    return value
+      .replacingOccurrences(of: "\n", with: "\\n")
+      .replacingOccurrences(of: "\r", with: "\\r")
+      .prefix(maxLen)
+      .description
+  }
+
+  private static func logCertDecode(stage: String, details: String) {
+    NSLog("[\(tag)][CERT_DECODE] \(stage) | \(details)")
+  }
+
   private static func normalizeEscapedNewlines(_ value: String) -> String {
     return value
       .replacingOccurrences(of: "\\n", with: "\n")
@@ -390,13 +772,17 @@ public class ZatcaCryptoModule: Module {
   }
 
   private static func extractPemBody(from value: String, begin: String, end: String) -> String? {
-    guard value.contains(begin), value.contains(end) else {
+    guard let beginRange = value.range(of: begin) else {
+      return nil
+    }
+
+    let contentStart = beginRange.upperBound
+    guard let endRange = value.range(of: end, range: contentStart..<value.endIndex) else {
       return nil
     }
 
     let body = value
-      .replacingOccurrences(of: begin, with: "")
-      .replacingOccurrences(of: end, with: "")
+      .substring(with: contentStart..<endRange.lowerBound)
       .replacingOccurrences(of: "\n", with: "")
       .replacingOccurrences(of: "\r", with: "")
       .replacingOccurrences(of: " ", with: "")
@@ -595,10 +981,10 @@ public class ZatcaCryptoModule: Module {
   }
 
   private static func oidToName(_ oidBytes: [UInt8]) -> String {
-    // Common X.500 attribute OIDs
+    // Common X.500 / LDAP attribute OIDs
     let oid = oidBytes.map { String($0) }.joined(separator: ".")
 
-    // Map common OIDs to names
+    // Map common OIDs to names (matching Java's X509Certificate.issuerDN.name output)
     if oidBytes == [0x55, 0x04, 0x03] { return "CN" }
     if oidBytes == [0x55, 0x04, 0x06] { return "C" }
     if oidBytes == [0x55, 0x04, 0x07] { return "L" }
@@ -606,7 +992,14 @@ public class ZatcaCryptoModule: Module {
     if oidBytes == [0x55, 0x04, 0x0A] { return "O" }
     if oidBytes == [0x55, 0x04, 0x0B] { return "OU" }
     if oidBytes == [0x55, 0x04, 0x05] { return "SERIALNUMBER" }
-    if oidBytes == [0x09, 0x92, 0x26, 0x89, 0x93, 0xF2, 0x2C, 0x64, 0x01, 0x19] { return "UID" }
+    // OID 0.9.2342.19200300.100.1.25 = domainComponent (DC)
+    // DER encoding: 09 92 26 89 93 F2 2C 64 01 19
+    if oidBytes == [0x09, 0x92, 0x26, 0x89, 0x93, 0xF2, 0x2C, 0x64, 0x01, 0x19] { return "DC" }
+    // OID 0.9.2342.19200300.100.1.1 = userId (UID)
+    // DER encoding: 09 92 26 89 93 F2 2C 64 01 01
+    if oidBytes == [0x09, 0x92, 0x26, 0x89, 0x93, 0xF2, 0x2C, 0x64, 0x01, 0x01] { return "UID" }
+    // OID 1.2.840.113549.1.9.1 = emailAddress (E / EMAILADDRESS)
+    if oidBytes == [0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x09, 0x01] { return "E" }
     return "OID.\(oid)"
   }
 }
