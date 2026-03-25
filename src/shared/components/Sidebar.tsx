@@ -1,10 +1,10 @@
+import { logout, selectUser } from '@/src/features/auth/authSlice';
+import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { logout, selectUser } from '@/src/features/auth/authSlice';
-import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 
 type NavItem = {
   name: string;

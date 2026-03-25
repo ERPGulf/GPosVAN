@@ -2,9 +2,9 @@ import { selectIsAuthenticated } from '@/src/features/auth/authSlice';
 import { Sidebar } from '@/src/shared/components/Sidebar';
 import { TopBar } from '@/src/shared/components/TopBar';
 import { useAppSelector } from '@/src/store/hooks';
-import { Drawer } from 'expo-router/drawer';
-import { Redirect } from 'expo-router';
 import { DrawerActions } from '@react-navigation/native';
+import { Redirect } from 'expo-router';
+import { Drawer } from 'expo-router/drawer';
 import { View, useWindowDimensions } from 'react-native';
 
 export default function ProtectedLayout() {
