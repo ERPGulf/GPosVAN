@@ -132,7 +132,7 @@ export default function CheckoutPage() {
         }
       }
       if (!zatcaConfig) {
-        alert('ZATCA config not found. Please sync settings first or store app settings locally.');
+        alert('ZATCA config not found! Please sync settings first or store app settings locally.');
         return;
       }
 
