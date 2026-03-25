@@ -171,7 +171,7 @@ function buildAccountingCustomerParty(
 ): string {
   const isStandard = invoiceSubType === '0100000';
   const buyerTaxId = isValidSaudiVat(customer.taxId) ? digitsOnly(customer.taxId) : '';
-  const otherBuyerId = (customer.buyerId ?? customer.id ?? '').trim();
+  const otherBuyerId = (customer.buyerId ?? '').trim();
   const buyerIdType = (customer.buyerIdType ?? '').trim().toUpperCase();
   const buyerSchemeId =
     buyerIdType === 'CRN'

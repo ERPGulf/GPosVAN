@@ -151,7 +151,7 @@ export default function CheckoutPage() {
           name: selectedCustomer?.name ?? 'Walk-in Customer',
           phoneNo: selectedCustomer?.phoneNo ?? null,
           taxId: selectedCustomer?.taxId ?? null,
-          buyerId: selectedCustomer?.registrationNo ?? selectedCustomer?.id ?? null,
+          buyerId: selectedCustomer?.registrationNo ?? null,
           buyerIdType: selectedCustomer?.registrationType ?? null,
           address: {
             streetName: (selectedCustomer?.addressLine1 ?? '').trim(),
