@@ -40,28 +40,12 @@ public class ZatcaCryptoModule: Module {
         throw NSError(domain: "ZatcaCrypto", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid UTF-8 data"])
       }
 
-      // Load the EC private key via SecKey (handles PKCS#8, SEC1, PEM, base64 variants)
-      let privateKey = try Self.loadECPrivateKey(pem: privateKeyPem)
+      // Load EC private key via CryptoKit (more reliable than SecKeyCreateWithData)
+      let privateKey = try Self.loadCryptoKitPrivateKey(pem: privateKeyPem)
 
-      // Verify the key supports ECDSA SHA-256 signing before attempting
-      guard SecKeyIsAlgorithmSupported(privateKey, .sign, .ecdsaSignatureMessageX962SHA256) else {
-        throw NSError(domain: "ZatcaCrypto", code: 3,
-                      userInfo: [NSLocalizedDescriptionKey: "ECDSA signing failed: key does not support ecdsaSignatureMessageX962SHA256"])
-      }
-
-      // Sign: SHA-256 hash + ECDSA sign + DER/X9.62 output
-      // This is the exact equivalent of Java's Signature.getInstance("SHA256withECDSA")
-      var error: Unmanaged<CFError>?
-      guard let signatureData = SecKeyCreateSignature(
-        privateKey,
-        .ecdsaSignatureMessageX962SHA256,
-        dataBytes as CFData,
-        &error
-      ) as Data? else {
-        let desc = error?.takeRetainedValue().localizedDescription ?? "unknown error"
-        throw NSError(domain: "ZatcaCrypto", code: 3,
-                      userInfo: [NSLocalizedDescriptionKey: "ECDSA signing failed: \(desc)"])
-      }
+      // Sign with ECDSA-SHA256 — equivalent to Java's Signature.getInstance("SHA256withECDSA")
+      let signature = try privateKey.signature(for: SHA256.hash(data: dataBytes))
+      let signatureData = signature.derRepresentation
 
       NSLog("[%@] signECDSA: signature created, DER len=%d", Self.tag, signatureData.count)
 
@@ -199,7 +183,41 @@ public class ZatcaCryptoModule: Module {
     }
   }
 
-  // MARK: - EC Private Key Loading
+  // MARK: - CryptoKit EC Private Key Loading
+
+  private static func loadCryptoKitPrivateKey(pem: String) throws -> P256.Signing.PrivateKey {
+    guard let keyData = decodePrivateKeyData(pem) else {
+      NSLog("[%@] loadCryptoKitPrivateKey: decodePrivateKeyData returned nil", tag)
+      throw NSError(domain: "ZatcaCrypto", code: 30, userInfo: [NSLocalizedDescriptionKey: "Invalid base64 in private key PEM"])
+    }
+
+    NSLog("[%@] loadCryptoKitPrivateKey: decoded key data len=%d, prefixHex=%@",
+          tag, keyData.count, bytePrefixHex(keyData))
+
+    let rawKeyData = try Self.extractRawECPrivateKeyData(keyData)
+
+    NSLog("[%@] loadCryptoKitPrivateKey: extracted raw key data len=%d, prefixHex=%@",
+          tag, rawKeyData.count, bytePrefixHex(rawKeyData))
+
+    if rawKeyData.count == 97 {
+      // x9.63 format: 04 || X(32) || Y(32) || D(32)
+      // Extract just the 32-byte private scalar (last 32 bytes) and let CryptoKit
+      // derive the correct public key, in case the embedded public key is mismatched.
+      let privateScalar = rawKeyData.suffix(32)
+      NSLog("[%@] loadCryptoKitPrivateKey: extracting 32-byte scalar from 97-byte x9.63", tag)
+      return try P256.Signing.PrivateKey(rawRepresentation: privateScalar)
+    } else if rawKeyData.count == 32 {
+      // Raw scalar
+      NSLog("[%@] loadCryptoKitPrivateKey: loading from 32-byte raw scalar", tag)
+      return try P256.Signing.PrivateKey(rawRepresentation: rawKeyData)
+    } else {
+      // Try raw representation as fallback
+      NSLog("[%@] loadCryptoKitPrivateKey: trying %d bytes as raw representation", tag, rawKeyData.count)
+      return try P256.Signing.PrivateKey(rawRepresentation: rawKeyData)
+    }
+  }
+
+  // MARK: - EC Private Key Loading (SecKey — legacy)
 
   private static func loadECPrivateKey(pem: String) throws -> SecKey {
     guard let keyData = decodePrivateKeyData(pem) else {
@@ -217,6 +235,18 @@ public class ZatcaCryptoModule: Module {
     NSLog("[%@] loadECPrivateKey: extracted raw key data len=%d, prefixHex=%@",
           tag, rawKeyData.count, bytePrefixHex(rawKeyData))
 
+    // SecKeyCreateWithData requires the full ANSI x9.63 format (04 || X || Y || D = 97 bytes).
+    // When we only have the 32-byte private scalar (no embedded public key), derive the full
+    // x9.63 representation using CryptoKit.
+    let keyDataForSecKey: Data
+    if rawKeyData.count == 32 {
+      NSLog("[%@] loadECPrivateKey: deriving x9.63 from 32-byte scalar via CryptoKit", tag)
+      let ckKey = try P256.Signing.PrivateKey(rawRepresentation: rawKeyData)
+      keyDataForSecKey = ckKey.x963Representation
+    } else {
+      keyDataForSecKey = rawKeyData
+    }
+
     let attributes: [String: Any] = [
       kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
       kSecAttrKeyClass as String: kSecAttrKeyClassPrivate,
@@ -224,7 +254,7 @@ public class ZatcaCryptoModule: Module {
     ]
 
     var error: Unmanaged<CFError>?
-    guard let privateKey = SecKeyCreateWithData(rawKeyData as CFData, attributes as CFDictionary, &error) else {
+    guard let privateKey = SecKeyCreateWithData(keyDataForSecKey as CFData, attributes as CFDictionary, &error) else {
       let err = error?.takeRetainedValue()
       let desc = err.map { String(describing: $0) } ?? "unknown"
       NSLog("[%@] loadECPrivateKey: SecKeyCreateWithData FAILED: %@", tag, desc)
