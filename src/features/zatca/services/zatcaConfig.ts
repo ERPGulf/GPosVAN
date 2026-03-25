@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { ZatcaConfig } from '../types';
 import { zatcaLogger } from './zatcaLogger';
-import { TEST_ZATCA_SETTINGS_PAYLOAD } from './zatcaTestPayload';
+import { getZatcaPayloadFromSecureStore } from './zatcaTestPayload';
 
 const ZATCA_CONFIG_KEY = '@zatca_config';
 
@@ -33,10 +33,13 @@ export interface BackendConfigPayload {
   is_tax_included_in_price?: MaybeBooleanNumber;
 }
 
-function getForcedTestZatcaConfig(): ZatcaConfig {
-  // TODO: Remove this override and restore backend/storage-driven config after the
-  // certificate encoding issue is resolved consistently across devices.
-  return normalizeBackendZatcaConfig(TEST_ZATCA_SETTINGS_PAYLOAD);
+async function getZatcaConfigFromSecureStore(): Promise<ZatcaConfig | null> {
+  const payload = await getZatcaPayloadFromSecureStore();
+  if (!payload) {
+    zatcaLogger.warn('No ZATCA payload available from SecureStore');
+    return null;
+  }
+  return normalizeBackendZatcaConfig(payload);
 }
 
 function toBool(value: MaybeBooleanNumber, fallback = false): boolean {
@@ -107,8 +110,11 @@ export function normalizeBackendZatcaConfig(payload: BackendConfigPayload): Zatc
 export async function setZatcaConfigFromBackend(
   payload: BackendConfigPayload,
 ): Promise<ZatcaConfig> {
-  zatcaLogger.info('Using hardcoded ZATCA test payload instead of backend payload');
-  const normalized = getForcedTestZatcaConfig();
+  zatcaLogger.info('Loading ZATCA config from SecureStore');
+  const normalized = await getZatcaConfigFromSecureStore();
+  if (!normalized) {
+    throw new Error('No ZATCA config found in SecureStore');
+  }
   await setZatcaConfig(normalized);
   zatcaLogger.info('ZATCA config normalized and stored', {
     taxId: normalized.taxId,
@@ -118,9 +124,13 @@ export async function setZatcaConfigFromBackend(
 }
 
 export async function getZatcaConfig(): Promise<ZatcaConfig | null> {
-  const config = getForcedTestZatcaConfig();
+  const config = await getZatcaConfigFromSecureStore();
+  if (!config) {
+    zatcaLogger.warn('No ZATCA config available from SecureStore');
+    return null;
+  }
   await setZatcaConfig(config);
-  zatcaLogger.debug('Loaded hardcoded ZATCA test config', {
+  zatcaLogger.debug('Loaded ZATCA config from SecureStore', {
     hasTaxId: Boolean(config.taxId),
     hasCertificate: Boolean(config.certificate),
     isTaxIncludedInPrice: config.isTaxIncludedInPrice,
@@ -133,9 +143,13 @@ export async function getZatcaConfig(): Promise<ZatcaConfig | null> {
  * If found and valid, writes normalized config into @zatca_config and returns it.
  */
 export async function hydrateZatcaConfigFromStorage(): Promise<ZatcaConfig | null> {
-  const normalized = getForcedTestZatcaConfig();
+  const normalized = await getZatcaConfigFromSecureStore();
+  if (!normalized) {
+    zatcaLogger.warn('Cannot hydrate ZATCA config — nothing in SecureStore');
+    return null;
+  }
   await setZatcaConfig(normalized);
-  zatcaLogger.info('Hydrated ZATCA config from hardcoded test payload', {
+  zatcaLogger.info('Hydrated ZATCA config from SecureStore', {
     taxId: normalized.taxId,
   });
   return normalized;
