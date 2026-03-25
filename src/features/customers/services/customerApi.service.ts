@@ -13,6 +13,7 @@ import {
 export const fetchCustomers = async (): Promise<GetCustomerListResponse> => {
   try {
     const response = await apiClient.get<GetCustomerListResponse>('/gpos.gpos.pos.customer_list');
+    console.log(response.data);
     return response.data;
   } catch (error) {
     console.error('Error fetching customers:', error);
