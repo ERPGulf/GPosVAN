@@ -29,13 +29,13 @@ const NAV_ITEMS: NavItem[] = [
     routeName: 'customers/index',
     routePath: '/customers',
   },
-  {
-    name: 'Checkout',
-    label: 'Checkout',
-    icon: 'cart-outline',
-    routeName: 'checkout/index',
-    routePath: '/checkout',
-  },
+//   {
+//     name: 'Checkout',
+//     label: 'Checkout',
+//     icon: 'cart-outline',
+//     routeName: 'checkout/index',
+//     routePath: '/checkout',
+//   },
 ];
 
 interface SidebarProps {
