@@ -34,10 +34,23 @@ public class ZatcaCryptoModule: Module {
 
     // MARK: - signECDSA
     Function("signECDSA") { (data: String, privateKeyPem: String) -> [String: Any] in
+      NSLog("[%@] signECDSA called: dataLen=%d, pemLen=%d", Self.tag, data.count, privateKeyPem.count)
+
       guard let dataBytes = data.data(using: .utf8) else {
         throw NSError(domain: "ZatcaCrypto", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid UTF-8 data"])
       }
+
+      // Load the EC private key via SecKey (handles PKCS#8, SEC1, PEM, base64 variants)
       let privateKey = try Self.loadECPrivateKey(pem: privateKeyPem)
+
+      // Verify the key supports ECDSA SHA-256 signing before attempting
+      guard SecKeyIsAlgorithmSupported(privateKey, .sign, .ecdsaSignatureMessageX962SHA256) else {
+        throw NSError(domain: "ZatcaCrypto", code: 3,
+                      userInfo: [NSLocalizedDescriptionKey: "ECDSA signing failed: key does not support ecdsaSignatureMessageX962SHA256"])
+      }
+
+      // Sign: SHA-256 hash + ECDSA sign + DER/X9.62 output
+      // This is the exact equivalent of Java's Signature.getInstance("SHA256withECDSA")
       var error: Unmanaged<CFError>?
       guard let signatureData = SecKeyCreateSignature(
         privateKey,
@@ -45,9 +58,13 @@ public class ZatcaCryptoModule: Module {
         dataBytes as CFData,
         &error
       ) as Data? else {
-        let err = error?.takeRetainedValue()
-        throw NSError(domain: "ZatcaCrypto", code: 3, userInfo: [NSLocalizedDescriptionKey: "ECDSA signing failed: \(err?.localizedDescription ?? "unknown")"])
+        let desc = error?.takeRetainedValue().localizedDescription ?? "unknown error"
+        throw NSError(domain: "ZatcaCrypto", code: 3,
+                      userInfo: [NSLocalizedDescriptionKey: "ECDSA signing failed: \(desc)"])
       }
+
+      NSLog("[%@] signECDSA: signature created, DER len=%d", Self.tag, signatureData.count)
+
       let base64 = signatureData.base64EncodedString()
       let bytes = [UInt8](signatureData).map { Int($0) }
       return ["signatureBase64": base64, "signatureBytes": bytes]
@@ -186,12 +203,19 @@ public class ZatcaCryptoModule: Module {
 
   private static func loadECPrivateKey(pem: String) throws -> SecKey {
     guard let keyData = decodePrivateKeyData(pem) else {
+      NSLog("[%@] loadECPrivateKey: decodePrivateKeyData returned nil", tag)
       throw NSError(domain: "ZatcaCrypto", code: 30, userInfo: [NSLocalizedDescriptionKey: "Invalid base64 in private key PEM"])
     }
+
+    NSLog("[%@] loadECPrivateKey: decoded key data len=%d, prefixHex=%@",
+          tag, keyData.count, bytePrefixHex(keyData))
 
     // SecKeyCreateWithData for EC keys expects raw ANSI x9.63 key data.
     // We need to extract the raw private scalar from PKCS#8 or SEC1 DER wrappers.
     let rawKeyData = try Self.extractRawECPrivateKeyData(keyData)
+
+    NSLog("[%@] loadECPrivateKey: extracted raw key data len=%d, prefixHex=%@",
+          tag, rawKeyData.count, bytePrefixHex(rawKeyData))
 
     let attributes: [String: Any] = [
       kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,
@@ -202,8 +226,12 @@ public class ZatcaCryptoModule: Module {
     var error: Unmanaged<CFError>?
     guard let privateKey = SecKeyCreateWithData(rawKeyData as CFData, attributes as CFDictionary, &error) else {
       let err = error?.takeRetainedValue()
-      throw NSError(domain: "ZatcaCrypto", code: 31, userInfo: [NSLocalizedDescriptionKey: "Failed to create EC private key: \(err?.localizedDescription ?? "unknown")"])
+      let desc = err.map { String(describing: $0) } ?? "unknown"
+      NSLog("[%@] loadECPrivateKey: SecKeyCreateWithData FAILED: %@", tag, desc)
+      throw NSError(domain: "ZatcaCrypto", code: 31, userInfo: [NSLocalizedDescriptionKey: "Failed to create EC private key: \(desc)"])
     }
+
+    NSLog("[%@] loadECPrivateKey: key created successfully", tag)
     return privateKey
   }
 
@@ -519,9 +547,10 @@ public class ZatcaCryptoModule: Module {
   private static func decodeCertificateData(_ raw: String) -> Data? {
     let normalized = normalizeEscapedNewlines(raw)
 
+    let inputHasPem = normalized.contains("BEGIN CERTIFICATE")
     logCertDecode(
       stage: "input",
-      details: "rawLen=\(raw.count), normalizedLen=\(normalized.count), hasPem=\(normalized.contains(\"BEGIN CERTIFICATE\")), prefix=\(textPrefix(normalized))"
+      details: "rawLen=\(raw.count), normalizedLen=\(normalized.count), hasPem=\(inputHasPem), prefix=\(textPrefix(normalized))"
     )
 
     let directPemBody = extractPemBody(
@@ -536,9 +565,10 @@ public class ZatcaCryptoModule: Module {
 
     if let directPemBody {
       let firstDecode = decodeBase64Lenient(directPemBody)
+      let firstDecodePrefixHex = firstDecode.map { bytePrefixHex($0) } ?? ""
       logCertDecode(
         stage: "directPemBody.firstDecode",
-        details: "decoded=\(firstDecode != nil), len=\(firstDecode?.count ?? 0), der=\(firstDecode.map(isLikelyDerCertificate) ?? false), prefixHex=\(firstDecode.map(bytePrefixHex) ?? \"\")"
+        details: "decoded=\(firstDecode != nil), len=\(firstDecode?.count ?? 0), der=\(firstDecode.map(isLikelyDerCertificate) ?? false), prefixHex=\(firstDecodePrefixHex)"
       )
 
       if let firstDecode {
@@ -548,9 +578,10 @@ public class ZatcaCryptoModule: Module {
         }
 
         let nestedText = String(data: firstDecode, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let nestedHasPem = nestedText.contains("BEGIN CERTIFICATE")
         logCertDecode(
           stage: "directPemBody.nestedText",
-          details: "len=\(nestedText.count), hasPem=\(nestedText.contains(\"BEGIN CERTIFICATE\")), prefix=\(textPrefix(nestedText))"
+          details: "len=\(nestedText.count), hasPem=\(nestedHasPem), prefix=\(textPrefix(nestedText))"
         )
 
         let nestedPemBody = extractPemBody(
@@ -560,9 +591,10 @@ public class ZatcaCryptoModule: Module {
         )
         if let nestedPemBody {
           let nestedPemDer = decodeBase64Lenient(nestedPemBody)
+          let nestedPemDerPrefixHex = nestedPemDer.map { bytePrefixHex($0) } ?? ""
           logCertDecode(
             stage: "directPemBody.nestedPemDer",
-            details: "decoded=\(nestedPemDer != nil), len=\(nestedPemDer?.count ?? 0), der=\(nestedPemDer.map(isLikelyDerCertificate) ?? false), prefixHex=\(nestedPemDer.map(bytePrefixHex) ?? \"\")"
+            details: "decoded=\(nestedPemDer != nil), len=\(nestedPemDer?.count ?? 0), der=\(nestedPemDer.map(isLikelyDerCertificate) ?? false), prefixHex=\(nestedPemDerPrefixHex)"
           )
 
           if let nestedPemDer, isLikelyDerCertificate(nestedPemDer) {
@@ -572,9 +604,10 @@ public class ZatcaCryptoModule: Module {
         }
 
         let nestedDer = decodeBase64Lenient(nestedText)
+        let nestedDerPrefixHex = nestedDer.map { bytePrefixHex($0) } ?? ""
         logCertDecode(
           stage: "directPemBody.nestedDer",
-          details: "decoded=\(nestedDer != nil), len=\(nestedDer?.count ?? 0), der=\(nestedDer.map(isLikelyDerCertificate) ?? false), prefixHex=\(nestedDer.map(bytePrefixHex) ?? \"\")"
+          details: "decoded=\(nestedDer != nil), len=\(nestedDer?.count ?? 0), der=\(nestedDer.map(isLikelyDerCertificate) ?? false), prefixHex=\(nestedDerPrefixHex)"
         )
 
         if let nestedDer, isLikelyDerCertificate(nestedDer) {
@@ -588,9 +621,11 @@ public class ZatcaCryptoModule: Module {
     }
 
     let decodedText = decodeBase64Text(normalized)
+    let decodedHasPem = decodedText?.contains("BEGIN CERTIFICATE") ?? false
+    let decodedPrefix = decodedText.map { textPrefix($0) } ?? ""
     logCertDecode(
       stage: "decodedText",
-      details: "decoded=\(decodedText != nil), len=\(decodedText?.count ?? 0), hasPem=\(decodedText?.contains(\"BEGIN CERTIFICATE\") ?? false), prefix=\(decodedText.map(textPrefix) ?? \"\")"
+      details: "decoded=\(decodedText != nil), len=\(decodedText?.count ?? 0), hasPem=\(decodedHasPem), prefix=\(decodedPrefix)"
     )
 
     if let decodedText {
@@ -602,9 +637,10 @@ public class ZatcaCryptoModule: Module {
 
       if let nestedPemBody {
         let firstDecode = decodeBase64Lenient(nestedPemBody)
+        let firstDecodePrefixHex2 = firstDecode.map { bytePrefixHex($0) } ?? ""
         logCertDecode(
           stage: "decodedText.firstDecode",
-          details: "decoded=\(firstDecode != nil), len=\(firstDecode?.count ?? 0), der=\(firstDecode.map(isLikelyDerCertificate) ?? false), prefixHex=\(firstDecode.map(bytePrefixHex) ?? \"\")"
+          details: "decoded=\(firstDecode != nil), len=\(firstDecode?.count ?? 0), der=\(firstDecode.map(isLikelyDerCertificate) ?? false), prefixHex=\(firstDecodePrefixHex2)"
         )
 
         if let firstDecode {
@@ -614,9 +650,10 @@ public class ZatcaCryptoModule: Module {
           }
 
           let nestedText = String(data: firstDecode, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+          let nestedHasPem2 = nestedText.contains("BEGIN CERTIFICATE")
           logCertDecode(
             stage: "decodedText.nestedText",
-            details: "len=\(nestedText.count), hasPem=\(nestedText.contains(\"BEGIN CERTIFICATE\")), prefix=\(textPrefix(nestedText))"
+            details: "len=\(nestedText.count), hasPem=\(nestedHasPem2), prefix=\(textPrefix(nestedText))"
           )
 
           let nestedPemBody2 = extractPemBody(
@@ -626,9 +663,10 @@ public class ZatcaCryptoModule: Module {
           )
           if let nestedPemBody2 {
             let nestedPemDer2 = decodeBase64Lenient(nestedPemBody2)
+            let nestedPemDer2PrefixHex = nestedPemDer2.map { bytePrefixHex($0) } ?? ""
             logCertDecode(
               stage: "decodedText.nestedPemDer2",
-              details: "decoded=\(nestedPemDer2 != nil), len=\(nestedPemDer2?.count ?? 0), der=\(nestedPemDer2.map(isLikelyDerCertificate) ?? false), prefixHex=\(nestedPemDer2.map(bytePrefixHex) ?? \"\")"
+              details: "decoded=\(nestedPemDer2 != nil), len=\(nestedPemDer2?.count ?? 0), der=\(nestedPemDer2.map(isLikelyDerCertificate) ?? false), prefixHex=\(nestedPemDer2PrefixHex)"
             )
 
             if let nestedPemDer2, isLikelyDerCertificate(nestedPemDer2) {
@@ -638,9 +676,10 @@ public class ZatcaCryptoModule: Module {
           }
 
           let nestedDer = decodeBase64Lenient(nestedText)
+          let nestedDerPrefixHex2 = nestedDer.map { bytePrefixHex($0) } ?? ""
           logCertDecode(
             stage: "decodedText.nestedDer",
-            details: "decoded=\(nestedDer != nil), len=\(nestedDer?.count ?? 0), der=\(nestedDer.map(isLikelyDerCertificate) ?? false), prefixHex=\(nestedDer.map(bytePrefixHex) ?? \"\")"
+            details: "decoded=\(nestedDer != nil), len=\(nestedDer?.count ?? 0), der=\(nestedDer.map(isLikelyDerCertificate) ?? false), prefixHex=\(nestedDerPrefixHex2)"
           )
 
           if let nestedDer, isLikelyDerCertificate(nestedDer) {
@@ -681,9 +720,10 @@ public class ZatcaCryptoModule: Module {
     )
     if let nestedPemBody {
       let nestedPemDer = decodeBase64Lenient(nestedPemBody)
+      let compactNestedPrefixHex = nestedPemDer.map { bytePrefixHex($0) } ?? ""
       logCertDecode(
         stage: "compact.nestedPemDer",
-        details: "decoded=\(nestedPemDer != nil), len=\(nestedPemDer?.count ?? 0), der=\(nestedPemDer.map(isLikelyDerCertificate) ?? false), prefixHex=\(nestedPemDer.map(bytePrefixHex) ?? \"\")"
+        details: "decoded=\(nestedPemDer != nil), len=\(nestedPemDer?.count ?? 0), der=\(nestedPemDer.map(isLikelyDerCertificate) ?? false), prefixHex=\(compactNestedPrefixHex)"
       )
 
       if let nestedPemDer, isLikelyDerCertificate(nestedPemDer) {
@@ -693,9 +733,10 @@ public class ZatcaCryptoModule: Module {
     }
 
     let secondDecode = decodeBase64Lenient(nestedText)
+    let secondDecodePrefixHex = secondDecode.map { bytePrefixHex($0) } ?? ""
     logCertDecode(
       stage: "compact.secondDecode",
-      details: "decoded=\(secondDecode != nil), len=\(secondDecode?.count ?? 0), der=\(secondDecode.map(isLikelyDerCertificate) ?? false), prefixHex=\(secondDecode.map(bytePrefixHex) ?? \"\")"
+      details: "decoded=\(secondDecode != nil), len=\(secondDecode?.count ?? 0), der=\(secondDecode.map(isLikelyDerCertificate) ?? false), prefixHex=\(secondDecodePrefixHex)"
     )
 
     if let secondDecode, isLikelyDerCertificate(secondDecode) {
