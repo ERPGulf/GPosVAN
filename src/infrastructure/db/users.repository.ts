@@ -117,20 +117,28 @@ export const clearUsers = async (db: ExpoSQLiteDatabase): Promise<void> => {
 };
 
 /**
- * Authenticate a user by username and password.
+ * Authenticate a user by email (or username fallback) and password.
  * Password should be provided in plain text and will be compared against stored base64 encoded password.
  */
 export const authenticateUser = async <T extends Record<string, unknown>>(
   db: ExpoSQLiteDatabase<T>,
-  username: string,
+  emailOrUsername: string,
   password: string,
 ): Promise<{ success: boolean; user?: User; error?: string }> => {
   try {
-    // Query directly by username using SQL lower() for case-insensitive comparison
-    const result = await db
+    // Try to find the user by email first, then fall back to username
+    let result = await db
       .select()
       .from(users)
-      .where(sql`lower(${users.username}) = ${username.toLowerCase()}`);
+      .where(sql`lower(${users.email}) = ${emailOrUsername.toLowerCase()}`);
+
+    if (result.length === 0) {
+      // Fallback: search by username for backward compatibility
+      result = await db
+        .select()
+        .from(users)
+        .where(sql`lower(${users.username}) = ${emailOrUsername.toLowerCase()}`);
+    }
 
     const user = result[0];
 

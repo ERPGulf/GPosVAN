@@ -1,7 +1,5 @@
 import SetupScreen from '@/app/setup';
-import { pushPendingCustomers, syncAllCustomers } from '@/src/infrastructure/db/customers.repository';
 import migrations from '@/src/infrastructure/db/migrations/migrations';
-import { syncAllProducts } from '@/src/infrastructure/db/products.repository';
 import { isConfigured } from '@/src/services/configStore';
 import { persistor, store } from '@/src/store/store';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -9,13 +7,14 @@ import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { useMigrations } from 'drizzle-orm/expo-sqlite/migrator';
 import { Slot } from 'expo-router';
 import { openDatabaseSync, SQLiteProvider } from 'expo-sqlite';
-import { Suspense, useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Provider } from 'react-redux';
 import { PersistGate } from 'redux-persist/integration/react';
 import './global.css';
 
+import { UserSyncGate } from '@/src/features/auth/components/UserSyncGate';
 
 const queryClient = new QueryClient();
 const expoDb = openDatabaseSync('van_pos.db', { enableChangeListener: true });
@@ -24,52 +23,11 @@ const db = drizzle(expoDb);
 export default function RootLayout() {
   const { success, error } = useMigrations(db, migrations);
   const [configChecked, setConfigChecked] = useState<boolean | null>(null);
-  const hasSynced = useRef(false);
 
   // Check if app has been configured (first launch detection)
   useEffect(() => {
     isConfigured().then(setConfigChecked);
   }, []);
-
-  // Sync products and customers from API after migrations complete (once only)
-  useEffect(() => {
-    if (success && configChecked && !hasSynced.current) {
-      hasSynced.current = true;
-      // First push any offline-created customers, then pull latest data
-      pushPendingCustomers(db)
-        .then(() => {
-          if (__DEV__) {
-            console.log('[RootLayout] Pending customers pushed successfully');
-          }
-        })
-        .catch((err) => {
-          console.error('[RootLayout] Failed to push pending customers:', err);
-        })
-        .finally(() => {
-          // Pull latest data from API (regardless of push result)
-          Promise.all([
-            syncAllProducts(db)
-              .then(() => {
-                if (__DEV__) {
-                  console.log('[RootLayout] Products synced successfully');
-                }
-              })
-              .catch((err) => {
-                console.error('[RootLayout] Failed to sync products:', err);
-              }),
-            syncAllCustomers(db)
-              .then(() => {
-                if (__DEV__) {
-                  console.log('[RootLayout] Customers synced successfully');
-                }
-              })
-              .catch((err) => {
-                console.error('[RootLayout] Failed to sync customers:', err);
-              }),
-          ]);
-        });
-    }
-  }, [success, configChecked]);
 
   // Still checking secure store
   if (configChecked === null) {
@@ -106,7 +64,6 @@ export default function RootLayout() {
     );
   }
 
-
   return (
     <Provider store={store}>
       <PersistGate loading={<ActivityIndicator size="large" color="#22c55e" />} persistor={persistor}>
@@ -117,9 +74,11 @@ export default function RootLayout() {
               options={{ enableChangeListener: true }}
               useSuspense
             >
-              <SafeAreaView className="flex-1 bg-gray-50">
-                <Slot />
-              </SafeAreaView>
+              <UserSyncGate>
+                <SafeAreaView className="flex-1 bg-gray-50">
+                  <Slot />
+                </SafeAreaView>
+              </UserSyncGate>
             </SQLiteProvider>
           </Suspense>
         </QueryClientProvider>
@@ -127,4 +86,3 @@ export default function RootLayout() {
     </Provider>
   );
 }
-
