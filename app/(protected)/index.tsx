@@ -72,9 +72,12 @@ export default function App() {
 
             const matchesSearch = matchesNameOrCode || matchesBarcode;
 
-            const matchesFilter =
-                selectedFilter === 'All' ||
-                (product.categoryId ? categoryNameMap.get(product.categoryId) === selectedFilter : false);
+            let matchesFilter = false;
+            if (selectedFilter === 'All') {
+                matchesFilter = true;
+            } else if (product.categoryId) {
+                matchesFilter = categoryNameMap.get(product.categoryId) === selectedFilter;
+            }
 
             return matchesSearch && matchesFilter;
         });
