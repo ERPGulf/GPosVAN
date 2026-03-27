@@ -1,4 +1,5 @@
 import { logout, selectUser } from '@/src/features/auth/authSlice';
+import { clearUserTokens } from '@/src/services/api/tokenManager';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
@@ -61,7 +62,8 @@ export function Sidebar({ drawerProps, onToggle }: SidebarProps) {
     onToggle?.();
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await clearUserTokens();
     dispatch(logout());
     router.replace('/login');
   };
