@@ -107,3 +107,32 @@ export const unitOfMeasuresRelations = relations(unitOfMeasures, ({ one }) => ({
 export const categoriesRelations = relations(categories, ({ many }) => ({
   products: many(products),
 }));
+
+// Shift table
+export const shifts = sqliteTable('Shifts', {
+  id: text('id')
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  shiftLocalId: text('shift_local_id'),
+  userId: text('user_id'),
+  openingCash: real('opening_cash').default(0),
+  shiftStartDate: integer('shift_start_date', { mode: 'timestamp' }).notNull(),
+  closingShiftDate: integer('closing_shift_date', { mode: 'timestamp' }),
+  closingCash: real('closing_cash').default(0),
+  closingExpectedCash: real('closing_expected_cash').default(0),
+  closingExpectedCard: real('closing_expected_card').default(0),
+  closingCard: real('closing_card').default(0),
+  claimedLoyalityAmount: real('claimed_loyality_amount').default(0),
+  isOpeningSynced: integer('is_opening_synced', { mode: 'boolean' }).default(false),
+  isClosingSynced: integer('is_closing_synced', { mode: 'boolean' }).default(false),
+  shiftOpeningId: text('shift_opening_id'),
+  branch: text('branch'),
+  isShiftClosed: integer('is_shift_closed', { mode: 'boolean' }).default(false),
+  salesReturn: real('sales_return').default(0),
+});
+
+// ShiftIdSequence table
+export const shiftIdSequence = sqliteTable('ShiftsIdSequence', {
+  userId: text('user_id').primaryKey(),
+  sequence: integer('sequence').default(0),
+});
