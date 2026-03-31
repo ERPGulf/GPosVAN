@@ -1,9 +1,10 @@
 import { pushPendingCustomers, syncAllCustomers } from '@/src/infrastructure/db/customers.repository';
 import { syncAllProducts } from '@/src/infrastructure/db/products.repository';
-import { selectIsAuthenticated } from '@/src/features/auth/authSlice';
+import { selectIsAuthenticated, selectUser, selectSelectedPosProfile, setPosProfile } from '@/src/features/auth/authSlice';
+import { PosProfileModal } from '@/src/features/auth/components/PosProfileModal';
 import { Sidebar } from '@/src/shared/components/Sidebar';
 import { TopBar } from '@/src/shared/components/TopBar';
-import { useAppSelector } from '@/src/store/hooks';
+import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { DrawerActions } from '@react-navigation/native';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { Redirect } from 'expo-router';
@@ -17,9 +18,22 @@ const db = drizzle(expoDb);
 
 export default function ProtectedLayout() {
   const isAuthenticated = useAppSelector(selectIsAuthenticated);
+  const user = useAppSelector(selectUser);
+  const selectedPosProfile = useAppSelector(selectSelectedPosProfile);
+  const dispatch = useAppDispatch();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 1024;
   const hasSynced = useRef(false);
+
+  const posProfiles = user?.posProfile ?? [];
+  const needsProfileSelection = posProfiles.length > 1 && !selectedPosProfile;
+
+  // Auto-select if exactly one POS profile
+  useEffect(() => {
+    if (posProfiles.length === 1 && !selectedPosProfile) {
+      dispatch(setPosProfile(posProfiles[0]));
+    }
+  }, [posProfiles, selectedPosProfile, dispatch]);
 
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
@@ -69,6 +83,8 @@ export default function ProtectedLayout() {
 
   return (
     <View className="flex-1 bg-white">
+      {/* POS Profile Selection Modal */}
+      <PosProfileModal visible={needsProfileSelection} profiles={posProfiles} />
       <Drawer
         defaultStatus={isDesktop ? 'open' : 'closed'}
         drawerContent={(props) => (

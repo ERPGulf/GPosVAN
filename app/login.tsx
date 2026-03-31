@@ -24,7 +24,7 @@ import './global.css';
 
 // Validation schema
 const loginSchema = yup.object().shape({
-  email: yup.string().email('Enter a valid email').required('Email is required'),
+  email: yup.string().required('Email is required'),
   password: yup.string().required('Password is required'),
 });
 
