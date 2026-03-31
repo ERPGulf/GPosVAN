@@ -16,6 +16,7 @@ import {
   hydrateZatcaConfigFromStorage,
   setZatcaConfigFromBackend,
 } from '@/src/features/zatca/services/zatcaConfig';
+import { saveInvoiceFiles } from '@/src/features/zatca/services/invoiceFileStorage';
 import { getZatcaPayloadFromSecureStore } from '@/src/features/zatca/services/zatcaTestPayload';
 import type { InvoiceParams } from '@/src/features/zatca/types';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
@@ -44,6 +45,7 @@ interface SelectedCustomer {
 const PIH_STORAGE_KEY = '@zatca_pih';
 
 interface GeneratedInvoiceState {
+  invoiceUUID: string;
   xml: string;
   qrData: string;
   invoiceHash: string;
@@ -181,8 +183,11 @@ export default function CheckoutPage() {
       await AsyncStorage.setItem('@zatca_last_invoice_xml', invoiceResult.xml);
       await AsyncStorage.setItem('@zatca_last_qr_data', invoiceResult.qrData);
 
+      // Invoice UUID is stored in state so the QR PNG capture callback can save files
+      const invoiceUUID = invoiceParams.invoiceUUID;
+
       console.log('Complete Payment', paymentDetails);
-      setGeneratedInvoice(invoiceResult);
+      setGeneratedInvoice({ invoiceUUID, ...invoiceResult });
       setIsInvoiceModalVisible(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to complete payment';
@@ -481,7 +486,22 @@ export default function CheckoutPage() {
 
             {generatedInvoice?.qrData ? (
               <View className="items-center mb-4">
-                <InvoiceQR qrData={generatedInvoice.qrData} size={210} />
+                <InvoiceQR
+                  qrData={generatedInvoice.qrData}
+                  size={210}
+                  onCapturePng={async (base64Png) => {
+                    try {
+                      const { xmlPath, qrPngPath } = await saveInvoiceFiles(
+                        generatedInvoice.invoiceUUID,
+                        generatedInvoice.xml,
+                        base64Png,
+                      );
+                      console.log(`Invoice files saved: ${xmlPath}, ${qrPngPath}`);
+                    } catch (err) {
+                      console.error('Failed to save invoice files:', err);
+                    }
+                  }}
+                />
               </View>
             ) : (
               <Text className="text-red-500 mb-4">QR data is not available.</Text>
