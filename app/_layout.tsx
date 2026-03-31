@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { useMigrations } from 'drizzle-orm/expo-sqlite/migrator';
 import { Slot } from 'expo-router';
+import { useDrizzleStudio } from 'expo-drizzle-studio-plugin';
 import { openDatabaseSync, SQLiteProvider } from 'expo-sqlite';
 import { Suspense, useEffect, useState } from 'react';
 import { ActivityIndicator, Text, View } from 'react-native';
@@ -21,6 +22,7 @@ const expoDb = openDatabaseSync('van_pos.db', { enableChangeListener: true });
 const db = drizzle(expoDb);
 
 export default function RootLayout() {
+  useDrizzleStudio(expoDb);
   const { success, error } = useMigrations(db, migrations);
   const [configChecked, setConfigChecked] = useState<boolean | null>(null);
 

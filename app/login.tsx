@@ -6,7 +6,6 @@ import { clearUserTokens } from '@/src/services/api/tokenManager';
 import { useAppDispatch } from '@/src/store/hooks';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
-import { useDrizzleStudio } from 'expo-drizzle-studio-plugin';
 import { useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import React, { useState } from 'react';
@@ -34,7 +33,6 @@ type LoginFormData = yup.InferType<typeof loginSchema>;
 export default function LoginScreen() {
   const db = useSQLiteContext();
   const drizzleDb = drizzle(db, { schema });
-  useDrizzleStudio(db);
   const router = useRouter();
   const dispatch = useAppDispatch();
 
