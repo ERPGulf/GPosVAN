@@ -1,6 +1,8 @@
+import { selectIsShiftOpen } from '@/src/features/shifts/shiftSlice';
+import { useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { CartItem } from '../../cart/types';
 
 
@@ -13,12 +15,22 @@ interface OrderSummaryProps {
 }
 
 export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onCheckout, showActions = true }: OrderSummaryProps) {
+  const isShiftOpen = useAppSelector(selectIsShiftOpen);
+
   const subtotal = cartItems.reduce((sum, item) => {
     const rate = item.product.uomPrice ?? item.product.price ?? 0;
     return sum + rate * item.quantity;
   }, 0);
   const discount = 0; // Discount logic to be implemented
   const total = subtotal - discount;
+
+  const handleCheckoutPress = () => {
+    if (!isShiftOpen) {
+      Alert.alert('Please open a shift before checking out.');
+      return;
+    }
+    onCheckout();
+  };
 
   return (
     // <View className="flex-col h-full bg-white border-l border-gray-200">
@@ -166,7 +178,7 @@ export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onChec
             <TouchableOpacity className="flex-1 bg-gray-200 py-3 rounded-xl items-center">
               <Text className="font-semibold text-gray-700">Save</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={onCheckout} className="flex-1 bg-green-500 py-3 rounded-xl items-center">
+            <TouchableOpacity onPress={handleCheckoutPress} className="flex-1 bg-green-500 py-3 rounded-xl items-center">
               <Text className="font-semibold text-white">Checkout</Text>
             </TouchableOpacity>
           </View>

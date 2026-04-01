@@ -1,10 +1,14 @@
 import { logout, selectSelectedPosProfile, selectUser } from '@/src/features/auth/authSlice';
 import { OpenShiftModal } from '@/src/features/shifts/components/OpenShiftModal';
+import { openShiftState } from '@/src/features/shifts/shiftSlice';
+import { openShift } from '@/src/infrastructure/db/shifts.repository';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { useRouter } from 'expo-router';
+import { useSQLiteContext } from 'expo-sqlite';
 import React, { useState } from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Text, TouchableOpacity, View } from 'react-native';
 
 interface TopBarProps {
   onMenuPress?: () => void;
@@ -12,6 +16,8 @@ interface TopBarProps {
 }
 
 export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
+  const sqliteDb = useSQLiteContext();
+  const db = drizzle(sqliteDb);
   const user = useAppSelector(selectUser);
   const selectedPosProfile = useAppSelector(selectSelectedPosProfile);
   const dispatch = useAppDispatch();
@@ -116,9 +122,22 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
       <OpenShiftModal
         visible={showOpenShiftModal}
         onClose={() => setShowOpenShiftModal(false)}
-        onSubmit={(cash) => {
-          console.log('Shift opened with cash:', cash);
-          setShowOpenShiftModal(false);
+        onSubmit={async (cash) => {
+          try {
+            const shiftLocalId = await openShift(db, {
+              userId: user?.id || '',
+              username: user?.username || user?.email || 'unknown',
+              openingCash: cash,
+            });
+            dispatch(openShiftState(shiftLocalId));
+            if (__DEV__) {
+              console.log('[TopBar] Shift opened:', shiftLocalId);
+            }
+            setShowOpenShiftModal(false);
+          } catch (err) {
+            console.error('[TopBar] Failed to open shift:', err);
+            Alert.alert('Error', 'Failed to open shift. Please try again.');
+          }
         }}
       />
     </View>

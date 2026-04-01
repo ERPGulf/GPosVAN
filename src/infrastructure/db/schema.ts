@@ -1,3 +1,4 @@
+import * as Crypto from 'expo-crypto';
 import { relations } from 'drizzle-orm';
 import { integer, real, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
@@ -69,7 +70,7 @@ export const productsRelations = relations(products, ({ one, many }) => ({
 export const barcodes = sqliteTable('Barcode', {
   id: text('id')
     .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
+    .$defaultFn(() => Crypto.randomUUID()),
   barCode: text('bar_code'),
   uom: text('uom'),
   productId: integer('product_id').references(() => products.id),
@@ -112,7 +113,7 @@ export const categoriesRelations = relations(categories, ({ many }) => ({
 export const shifts = sqliteTable('Shifts', {
   id: text('id')
     .primaryKey()
-    .$defaultFn(() => crypto.randomUUID()),
+    .$defaultFn(() => Crypto.randomUUID()),
   shiftLocalId: text('shift_local_id'),
   userId: text('user_id'),
   openingCash: real('opening_cash').default(0),
