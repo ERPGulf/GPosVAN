@@ -11,26 +11,22 @@ import {
 interface OpenShiftModalProps {
   visible: boolean;
   onClose: () => void;
-  onSubmit: (cashAmount: number, cardAmount: number) => void;
+  onSubmit: (cashAmount: number) => void;
 }
 
 export function OpenShiftModal({ visible, onClose, onSubmit }: OpenShiftModalProps) {
   const [cashAmount, setCashAmount] = useState<string>('');
-  const [cardAmount, setCardAmount] = useState<string>('');
 
   const handleConfirm = () => {
     const cash = parseFloat(cashAmount) || 0;
-    const card = parseFloat(cardAmount) || 0;
-    onSubmit(cash, card);
-    
+    onSubmit(cash);
+
     // Reset inputs
     setCashAmount('');
-    setCardAmount('');
   };
 
   const handleClose = () => {
     setCashAmount('');
-    setCardAmount('');
     onClose();
   };
 
@@ -71,22 +67,6 @@ export function OpenShiftModal({ visible, onClose, onSubmit }: OpenShiftModalPro
                   keyboardType="numeric"
                   value={cashAmount}
                   onChangeText={setCashAmount}
-                />
-              </View>
-            </View>
-
-            {/* Card Input */}
-            <View className="mb-6">
-              <Text className="text-gray-700 font-semibold mb-2 ml-1">Card Amount</Text>
-              <View className="flex-row items-center bg-gray-50 border border-gray-200 rounded-xl px-4">
-                <Ionicons name="card-outline" size={20} color="#9ca3af" />
-                <TextInput
-                  className="flex-1 px-3 py-3 text-gray-800 text-base"
-                  placeholder="0.00"
-                  placeholderTextColor="#9ca3af"
-                  keyboardType="numeric"
-                  value={cardAmount}
-                  onChangeText={setCardAmount}
                 />
               </View>
             </View>

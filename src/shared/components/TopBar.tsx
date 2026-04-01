@@ -1,8 +1,8 @@
 import { logout, selectSelectedPosProfile, selectUser } from '@/src/features/auth/authSlice';
-import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
-import { useRouter } from 'expo-router';
 import { OpenShiftModal } from '@/src/features/shifts/components/OpenShiftModal';
+import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 
@@ -73,7 +73,7 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
 
               <View className="h-px bg-gray-200 my-3" />
 
-              <TouchableOpacity 
+              <TouchableOpacity
                 className="flex-row items-center py-2"
                 onPress={() => {
                   setShowUserMenu(false);
@@ -83,8 +83,8 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
                 <MaterialCommunityIcons name="cog-outline" size={20} color="#4b5563" />
                 <Text className="ml-3 text-gray-700 font-medium text-base">Settings</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 className="flex-row items-center py-2"
                 onPress={() => {
                   setShowUserMenu(false);
@@ -97,7 +97,7 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
 
               <View className="h-px bg-gray-200 my-1" />
 
-              <TouchableOpacity 
+              <TouchableOpacity
                 className="flex-row items-center py-2 mt-1"
                 onPress={() => {
                   setShowUserMenu(false);
@@ -116,8 +116,8 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
       <OpenShiftModal
         visible={showOpenShiftModal}
         onClose={() => setShowOpenShiftModal(false)}
-        onSubmit={(cash, card) => {
-          console.log('Shift opened with cash:', cash, 'card:', card);
+        onSubmit={(cash) => {
+          console.log('Shift opened with cash:', cash);
           setShowOpenShiftModal(false);
         }}
       />
