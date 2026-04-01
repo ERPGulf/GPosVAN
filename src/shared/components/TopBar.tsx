@@ -1,6 +1,6 @@
 import { logout, selectSelectedPosProfile, selectUser } from '@/src/features/auth/authSlice';
 import { OpenShiftModal } from '@/src/features/shifts/components/OpenShiftModal';
-import { openShiftState } from '@/src/features/shifts/shiftSlice';
+import { closeShiftState, openShiftState, selectIsShiftOpen } from '@/src/features/shifts/shiftSlice';
 import { openShift } from '@/src/infrastructure/db/shifts.repository';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -20,6 +20,7 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
   const db = drizzle(sqliteDb);
   const user = useAppSelector(selectUser);
   const selectedPosProfile = useAppSelector(selectSelectedPosProfile);
+  const isShiftOpen = useAppSelector(selectIsShiftOpen);
   const dispatch = useAppDispatch();
   const router = useRouter();
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -90,16 +91,29 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
                 <Text className="ml-3 text-gray-700 font-medium text-base">Settings</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity
-                className="flex-row items-center py-2"
-                onPress={() => {
-                  setShowUserMenu(false);
-                  setShowOpenShiftModal(true);
-                }}
-              >
-                <MaterialCommunityIcons name="store-clock-outline" size={20} color="#4b5563" />
-                <Text className="ml-3 text-gray-700 font-medium text-base">Open Shift</Text>
-              </TouchableOpacity>
+              {!isShiftOpen ? (
+                <TouchableOpacity
+                  className="flex-row items-center py-2"
+                  onPress={() => {
+                    setShowUserMenu(false);
+                    setShowOpenShiftModal(true);
+                  }}
+                >
+                  <MaterialCommunityIcons name="store-clock-outline" size={20} color="#4b5563" />
+                  <Text className="ml-3 text-gray-700 font-medium text-base">Open Shift</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  className="flex-row items-center py-2"
+                  onPress={() => {
+                    setShowUserMenu(false);
+                    dispatch(closeShiftState());
+                  }}
+                >
+                  <MaterialCommunityIcons name="store-off-outline" size={20} color="#4b5563" />
+                  <Text className="ml-3 text-gray-700 font-medium text-base">Close Shift</Text>
+                </TouchableOpacity>
+              )}
 
               <View className="h-px bg-gray-200 my-1" />
 
