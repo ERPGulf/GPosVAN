@@ -1,11 +1,11 @@
-import { useUsers } from '@/src/features/auth';
 import { login } from '@/src/features/auth/authSlice';
 import * as schema from '@/src/infrastructure/db/schema';
 import { authenticateUser } from '@/src/infrastructure/db/users.repository';
+import { generateAppToken, generateUserToken } from '@/src/services/api/httpClient';
+import { clearUserTokens } from '@/src/services/api/tokenManager';
 import { useAppDispatch } from '@/src/store/hooks';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
-import { useDrizzleStudio } from 'expo-drizzle-studio-plugin';
 import { useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import React, { useState } from 'react';
@@ -24,7 +24,7 @@ import './global.css';
 
 // Validation schema
 const loginSchema = yup.object().shape({
-  username: yup.string().required('Username is required'),
+  email: yup.string().required('Email is required'),
   password: yup.string().required('Password is required'),
 });
 
@@ -33,12 +33,8 @@ type LoginFormData = yup.InferType<typeof loginSchema>;
 export default function LoginScreen() {
   const db = useSQLiteContext();
   const drizzleDb = drizzle(db, { schema });
-  useDrizzleStudio(db);
   const router = useRouter();
   const dispatch = useAppDispatch();
-
-  // Sync offline users from API
-  const { isLoading: isSyncingUsers } = useUsers();
 
   const [isLoading, setIsLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -50,7 +46,7 @@ export default function LoginScreen() {
   } = useForm<LoginFormData>({
     resolver: yupResolver(loginSchema),
     defaultValues: {
-      username: '',
+      email: '',
       password: '',
     },
   });
@@ -60,32 +56,70 @@ export default function LoginScreen() {
     setLoginError(null);
 
     try {
-      const result = await authenticateUser(drizzleDb, data.username, data.password);
+      // Try online login first: generate app token → generate user token
+      const appToken = await generateAppToken();
+      const userResponse = await generateUserToken(data.email, data.password, appToken);
 
-      if (result.success && result.user) {
-        // Strip password before storing in Redux (persisted automatically via redux-persist)
-        const { password: _, ...userWithoutPassword } = result.user;
+      // API login succeeded — user tokens already saved to SecureStore by generateUserToken
+      // Authenticate against local SQLite to get the full user profile
+      const localResult = await authenticateUser(drizzleDb, data.email, data.password);
+
+      if (localResult.success && localResult.user) {
+        const { password: _, ...userWithoutPassword } = localResult.user;
         dispatch(login(userWithoutPassword));
-        // Navigate to protected area after successful login
-        router.replace('/(protected)');
       } else {
-        setLoginError(result.error || 'Login failed');
+        // User exists on server but not in local DB — create a minimal user from API response
+        dispatch(
+          login({
+            id: userResponse.user.id,
+            email: userResponse.user.email,
+            username: userResponse.user.email,
+          }),
+        );
       }
-    } catch (error) {
-      setLoginError('An unexpected error occurred');
+
+      router.replace('/(protected)');
+    } catch (apiError: any) {
+      // Check if this is a network error (offline) — fall back to local login
+      const isNetworkError =
+        apiError?.code === 'ECONNABORTED' ||
+        apiError?.code === 'ERR_NETWORK' ||
+        apiError?.message?.includes('Network Error') ||
+        !apiError?.response;
+
+      if (isNetworkError) {
+        if (__DEV__) {
+          console.log('[Login] API unavailable, falling back to offline login');
+        }
+
+        try {
+          const offlineResult = await authenticateUser(drizzleDb, data.email, data.password);
+
+          if (offlineResult.success && offlineResult.user) {
+            // Clear any stale tokens since we're offline
+            await clearUserTokens();
+
+            const { password: _, ...userWithoutPassword } = offlineResult.user;
+            dispatch(login(userWithoutPassword));
+            router.replace('/(protected)');
+          } else {
+            setLoginError(offlineResult.error || 'Invalid credentials');
+          }
+        } catch (offlineError) {
+          setLoginError('Login failed. Please try again.');
+        }
+      } else {
+        // API returned an error (invalid credentials, etc.)
+        const errorMessage =
+          apiError?.response?.data?.message ||
+          apiError?.response?.data?.exc ||
+          'Invalid email or password';
+        setLoginError(errorMessage);
+      }
     } finally {
       setIsLoading(false);
     }
   };
-
-  if (isSyncingUsers) {
-    return (
-      <View className="flex-1 items-center justify-center bg-gray-50">
-        <ActivityIndicator size="large" color="#22c55e" />
-        <Text className="mt-4 text-gray-600">Syncing data...</Text>
-      </View>
-    );
-  }
 
   return (
     <KeyboardAvoidingView
@@ -111,28 +145,29 @@ export default function LoginScreen() {
             </View>
           )}
 
-          {/* Username Field */}
+          {/* Email Field */}
           <View className="mb-5">
-            <Text className="text-gray-700 font-semibold mb-2 ml-1">Username</Text>
+            <Text className="text-gray-700 font-semibold mb-2 ml-1">Email</Text>
             <Controller
               control={control}
-              name="username"
+              name="email"
               render={({ field: { onChange, onBlur, value } }) => (
                 <TextInput
-                  className={`w-full px-4 py-3 bg-gray-50 border rounded-xl text-gray-800 text-base ${errors.username ? 'border-red-400' : 'border-gray-200'
+                  className={`w-full px-4 py-3 bg-gray-50 border rounded-xl text-gray-800 text-base ${errors.email ? 'border-red-400' : 'border-gray-200'
                     }`}
-                  placeholder="Enter your username"
+                  placeholder="Enter your email"
                   placeholderTextColor="#9ca3af"
                   onBlur={onBlur}
                   onChangeText={onChange}
                   value={value}
                   autoCapitalize="none"
                   autoCorrect={false}
+                  keyboardType="email-address"
                 />
               )}
             />
-            {errors.username && (
-              <Text className="text-red-500 text-sm mt-1 ml-1">{errors.username.message}</Text>
+            {errors.email && (
+              <Text className="text-red-500 text-sm mt-1 ml-1">{errors.email.message}</Text>
             )}
           </View>
 

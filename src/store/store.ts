@@ -8,7 +8,7 @@ import { persistReducer, persistStore } from 'redux-persist';
 const authPersistConfig = {
   key: 'auth',
   storage: AsyncStorage,
-  whitelist: ['user'], // only persist the user field
+  whitelist: ['user', 'selectedPosProfile'], // persist user and selected POS profile
 };
 
 // Root Reducer

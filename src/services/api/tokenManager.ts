@@ -1,17 +1,21 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
-// Storage keys for tokens
-const ACCESS_TOKEN_KEY = '@gposvan_access_token';
-const REFRESH_TOKEN_KEY = '@gposvan_refresh_token';
-const TOKEN_EXPIRY_KEY = '@gposvan_token_expiry';
+// SecureStore keys for user tokens
+const USER_ACCESS_TOKEN_KEY = 'GPOS_USER_ACCESS_TOKEN';
+const USER_REFRESH_TOKEN_KEY = 'GPOS_USER_REFRESH_TOKEN';
+const USER_TOKEN_EXPIRY_KEY = 'GPOS_USER_TOKEN_EXPIRY';
 
 // In-memory cache for performance
-let cachedToken: string | null = null;
-let tokenExpiryTime: number | null = null;
+let cachedUserToken: string | null = null;
+let userTokenExpiryTime: number | null = null;
+
+// Refresh state to prevent concurrent refresh calls
 let isRefreshing = false;
 let refreshPromise: Promise<string | null> | null = null;
 
-export interface TokenData {
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+export interface AppTokenData {
   access_token: string;
   expires_in: number;
   token_type: string;
@@ -19,54 +23,87 @@ export interface TokenData {
   refresh_token: string;
 }
 
-export interface TokenResponse {
-  data: TokenData;
+export interface AppTokenResponse {
+  data: AppTokenData;
 }
 
+export interface UserTokenData {
+  access_token: string;
+  expires_in: number;
+  token_type: string;
+  scope: string;
+  refresh_token: string;
+}
+
+export interface UserTokenResponse {
+  data: {
+    token: UserTokenData;
+    user: {
+      id: string;
+      phone: string;
+      email: string;
+    };
+    time: string;
+    branch_id: string;
+  };
+}
+
+export interface RefreshTokenResponse {
+  data: {
+    access_token: string;
+    expires_in: number;
+    token_type: string;
+    scope: string;
+    refresh_token: string;
+  };
+}
+
+// ─── User Token Management (SecureStore) ─────────────────────────────────────
+
 /**
- * Save tokens to AsyncStorage
+ * Save user tokens to SecureStore
  */
-export const saveTokens = async (tokenResponse: TokenResponse): Promise<void> => {
+export const saveUserTokens = async (tokenData: UserTokenData): Promise<void> => {
   try {
-    const { access_token, refresh_token, expires_in } = tokenResponse.data;
+    const { access_token, refresh_token, expires_in } = tokenData;
 
     // Calculate expiry time (current time + expires_in seconds - 60 seconds buffer)
     const expiryTime = Date.now() + (expires_in - 60) * 1000;
 
     await Promise.all([
-      AsyncStorage.setItem(ACCESS_TOKEN_KEY, access_token),
-      AsyncStorage.setItem(REFRESH_TOKEN_KEY, refresh_token),
-      AsyncStorage.setItem(TOKEN_EXPIRY_KEY, expiryTime.toString()),
+      SecureStore.setItemAsync(USER_ACCESS_TOKEN_KEY, access_token),
+      SecureStore.setItemAsync(USER_REFRESH_TOKEN_KEY, refresh_token),
+      SecureStore.setItemAsync(USER_TOKEN_EXPIRY_KEY, expiryTime.toString()),
     ]);
 
     // Update cache
-    cachedToken = access_token;
-    tokenExpiryTime = expiryTime;
+    cachedUserToken = access_token;
+    userTokenExpiryTime = expiryTime;
 
     if (__DEV__) {
-      console.log('[TokenManager] Tokens saved successfully');
+      console.log('[TokenManager] User tokens saved to SecureStore');
     }
   } catch (error) {
-    console.error('[TokenManager] Failed to save tokens:', error);
+    console.error('[TokenManager] Failed to save user tokens:', error);
     throw error;
   }
 };
 
 /**
- * Get the current access token
- * Returns cached token if valid, otherwise retrieves from storage
+ * Get the current user access token.
+ * Returns cached token if valid, otherwise retrieves from SecureStore.
  */
-export const getAccessToken = async (): Promise<string | null> => {
+export const getUserAccessToken = async (): Promise<string | null> => {
   try {
     // Check if we have a valid cached token
-    if (cachedToken && tokenExpiryTime && Date.now() < tokenExpiryTime) {
-      return cachedToken;
+    if (cachedUserToken && userTokenExpiryTime && Date.now() < userTokenExpiryTime) {
+      return cachedUserToken;
     }
 
-    // Load from storage
+    // Load from SecureStore
     const [token, expiryStr] = await Promise.all([
-      AsyncStorage.getItem(ACCESS_TOKEN_KEY),
-      AsyncStorage.getItem(TOKEN_EXPIRY_KEY),
+      SecureStore.getItemAsync(USER_ACCESS_TOKEN_KEY),
+      SecureStore.getItemAsync(USER_TOKEN_EXPIRY_KEY),
     ]);
 
     if (!token || !expiryStr) {
@@ -78,65 +115,82 @@ export const getAccessToken = async (): Promise<string | null> => {
     // Check if token is expired
     if (Date.now() >= expiryTime) {
       if (__DEV__) {
-        console.log('[TokenManager] Token expired, needs refresh');
+        console.log('[TokenManager] User token expired, needs refresh');
       }
       return null;
     }
 
     // Update cache
-    cachedToken = token;
-    tokenExpiryTime = expiryTime;
+    cachedUserToken = token;
+    userTokenExpiryTime = expiryTime;
 
     return token;
   } catch (error) {
-    console.error('[TokenManager] Failed to get access token:', error);
+    console.error('[TokenManager] Failed to get user access token:', error);
     return null;
   }
 };
 
 /**
- * Get the refresh token from storage
+ * Get the user refresh token from SecureStore
  */
-export const getRefreshToken = async (): Promise<string | null> => {
+export const getUserRefreshToken = async (): Promise<string | null> => {
   try {
-    return await AsyncStorage.getItem(REFRESH_TOKEN_KEY);
+    return await SecureStore.getItemAsync(USER_REFRESH_TOKEN_KEY);
   } catch (error) {
-    console.error('[TokenManager] Failed to get refresh token:', error);
+    console.error('[TokenManager] Failed to get user refresh token:', error);
     return null;
   }
 };
 
 /**
- * Check if token is valid (not expired)
+ * Check if user token is valid (not expired)
  */
-export const isTokenValid = async (): Promise<boolean> => {
-  const token = await getAccessToken();
+export const isUserTokenValid = async (): Promise<boolean> => {
+  const token = await getUserAccessToken();
   return token !== null;
 };
 
 /**
- * Clear all stored tokens
+ * Clear all stored user tokens
  */
-export const clearTokens = async (): Promise<void> => {
+export const clearUserTokens = async (): Promise<void> => {
   try {
     await Promise.all([
-      AsyncStorage.removeItem(ACCESS_TOKEN_KEY),
-      AsyncStorage.removeItem(REFRESH_TOKEN_KEY),
-      AsyncStorage.removeItem(TOKEN_EXPIRY_KEY),
+      SecureStore.deleteItemAsync(USER_ACCESS_TOKEN_KEY),
+      SecureStore.deleteItemAsync(USER_REFRESH_TOKEN_KEY),
+      SecureStore.deleteItemAsync(USER_TOKEN_EXPIRY_KEY),
     ]);
 
     // Clear cache
-    cachedToken = null;
-    tokenExpiryTime = null;
+    cachedUserToken = null;
+    userTokenExpiryTime = null;
 
     if (__DEV__) {
-      console.log('[TokenManager] Tokens cleared');
+      console.log('[TokenManager] User tokens cleared');
     }
   } catch (error) {
-    console.error('[TokenManager] Failed to clear tokens:', error);
+    console.error('[TokenManager] Failed to clear user tokens:', error);
     throw error;
   }
 };
+
+/**
+ * Update user tokens after a refresh (saves new access + refresh token)
+ */
+export const updateUserTokensAfterRefresh = async (
+  refreshData: RefreshTokenResponse['data'],
+): Promise<void> => {
+  await saveUserTokens({
+    access_token: refreshData.access_token,
+    expires_in: refreshData.expires_in,
+    token_type: refreshData.token_type,
+    scope: refreshData.scope,
+    refresh_token: refreshData.refresh_token,
+  });
+};
+
+// ─── Refresh State Management ────────────────────────────────────────────────
 
 /**
  * Set refreshing state to prevent multiple concurrent refresh calls
