@@ -1,6 +1,7 @@
 import { logout, selectSelectedPosProfile, selectUser } from '@/src/features/auth/authSlice';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { useRouter } from 'expo-router';
+import { OpenShiftModal } from '@/src/features/shifts/components/OpenShiftModal';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import React, { useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
@@ -16,6 +17,7 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
   const dispatch = useAppDispatch();
   const router = useRouter();
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showOpenShiftModal, setShowOpenShiftModal] = useState(false);
 
   // Extract initials
   const getInitials = (name?: string | null) => {
@@ -83,6 +85,19 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
               </TouchableOpacity>
               
               <TouchableOpacity 
+                className="flex-row items-center py-2"
+                onPress={() => {
+                  setShowUserMenu(false);
+                  setShowOpenShiftModal(true);
+                }}
+              >
+                <MaterialCommunityIcons name="store-clock-outline" size={20} color="#4b5563" />
+                <Text className="ml-3 text-gray-700 font-medium text-base">Open Shift</Text>
+              </TouchableOpacity>
+
+              <View className="h-px bg-gray-200 my-1" />
+
+              <TouchableOpacity 
                 className="flex-row items-center py-2 mt-1"
                 onPress={() => {
                   setShowUserMenu(false);
@@ -96,6 +111,16 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
           )}
         </View>
       </View>
+
+      {/* Open Shift Modal */}
+      <OpenShiftModal
+        visible={showOpenShiftModal}
+        onClose={() => setShowOpenShiftModal(false)}
+        onSubmit={(cash, card) => {
+          console.log('Shift opened with cash:', cash, 'card:', card);
+          setShowOpenShiftModal(false);
+        }}
+      />
     </View>
   );
 }
