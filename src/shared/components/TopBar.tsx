@@ -1,7 +1,9 @@
 import { logout, selectSelectedPosProfile, selectUser } from '@/src/features/auth/authSlice';
 import { OpenShiftModal } from '@/src/features/shifts/components/OpenShiftModal';
-import { closeShiftState, openShiftState, selectIsShiftOpen } from '@/src/features/shifts/shiftSlice';
-import { openShift } from '@/src/infrastructure/db/shifts.repository';
+import { buildBalanceDetails, formatDateForApi, syncOpenShiftToServer } from '@/src/features/shifts/services/shiftApi.service';
+import { closeShiftState, openShiftState, selectIsShiftOpen, setShiftOpeningId } from '@/src/features/shifts/shiftSlice';
+import { markShiftOpeningSynced, openShift } from '@/src/infrastructure/db/shifts.repository';
+import { getAppConfig } from '@/src/services/configStore';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
@@ -145,9 +147,41 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
             });
             dispatch(openShiftState(shiftLocalId));
             if (__DEV__) {
-              console.log('[TopBar] Shift opened:', shiftLocalId);
+              console.log('[TopBar] Shift opened locally:', shiftLocalId);
             }
             setShowOpenShiftModal(false);
+
+            // Fire-and-forget: attempt immediate sync with server
+            (async () => {
+              try {
+                const appConfig = await getAppConfig();
+                const company = appConfig?.zatca?.company_name || '';
+                const posProfile = selectedPosProfile || '';
+                const userEmail = user?.email || '';
+
+                const syncId = await syncOpenShiftToServer({
+                  name: shiftLocalId,
+                  period_start_date: formatDateForApi(new Date()),
+                  company,
+                  user: userEmail,
+                  pos_profile: posProfile,
+                  balance_details: buildBalanceDetails(cash),
+                });
+
+                // Update local DB and Redux with server sync_id
+                await markShiftOpeningSynced(db, shiftLocalId, syncId);
+                dispatch(setShiftOpeningId(syncId));
+
+                if (__DEV__) {
+                  console.log('[TopBar] Shift synced with server, sync_id:', syncId);
+                }
+              } catch (syncErr) {
+                // Sync failed (offline or error) — will be retried on next app launch
+                if (__DEV__) {
+                  console.log('[TopBar] Shift sync failed, will retry later:', syncErr);
+                }
+              }
+            })();
           } catch (err) {
             console.error('[TopBar] Failed to open shift:', err);
             Alert.alert('Error', 'Failed to open shift. Please try again.');

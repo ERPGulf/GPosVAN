@@ -15,7 +15,7 @@ const authPersistConfig = {
 const shiftPersistConfig = {
   key: 'shift',
   storage: AsyncStorage,
-  whitelist: ['shiftLocalId', 'isShiftOpen'], // persist shift state across app restarts
+  whitelist: ['shiftLocalId', 'shiftOpeningId', 'isShiftOpen'], // persist shift state across app restarts
 };
 
 // Root Reducer

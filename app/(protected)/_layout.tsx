@@ -1,6 +1,8 @@
 import { pushPendingCustomers, syncAllCustomers } from '@/src/infrastructure/db/customers.repository';
 import { syncAllProducts } from '@/src/infrastructure/db/products.repository';
+import { pushPendingOpenShifts } from '@/src/infrastructure/db/shifts.repository';
 import { selectIsAuthenticated, selectUser, selectSelectedPosProfile, setPosProfile } from '@/src/features/auth/authSlice';
+import { selectShiftLocalId, setShiftOpeningId } from '@/src/features/shifts/shiftSlice';
 import { PosProfileModal } from '@/src/features/auth/components/PosProfileModal';
 import { Sidebar } from '@/src/shared/components/Sidebar';
 import { TopBar } from '@/src/shared/components/TopBar';
@@ -12,6 +14,7 @@ import { Drawer } from 'expo-router/drawer';
 import { openDatabaseSync } from 'expo-sqlite';
 import { useEffect, useRef } from 'react';
 import { View, useWindowDimensions } from 'react-native';
+import { getAppConfig } from '@/src/services/configStore';
 
 const expoDb = openDatabaseSync('van_pos.db', { enableChangeListener: true });
 const db = drizzle(expoDb);
@@ -20,6 +23,7 @@ export default function ProtectedLayout() {
   const isAuthenticated = useAppSelector(selectIsAuthenticated);
   const user = useAppSelector(selectUser);
   const selectedPosProfile = useAppSelector(selectSelectedPosProfile);
+  const currentShiftLocalId = useAppSelector(selectShiftLocalId);
   const dispatch = useAppDispatch();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 1024;
@@ -45,39 +49,69 @@ export default function ProtectedLayout() {
     if (!hasSynced.current) {
       hasSynced.current = true;
 
-      // First push any offline-created customers, then pull latest data
-      pushPendingCustomers(db)
-        .then(() => {
-          if (__DEV__) {
-            console.log('[ProtectedLayout] Pending customers pushed successfully');
+      // First push any offline-created customers and pending shifts, then pull latest data
+      Promise.all([
+        pushPendingCustomers(db)
+          .then(() => {
+            if (__DEV__) {
+              console.log('[ProtectedLayout] Pending customers pushed successfully');
+            }
+          })
+          .catch((err) => {
+            console.error('[ProtectedLayout] Failed to push pending customers:', err);
+          }),
+        // Push pending open shifts
+        (async () => {
+          try {
+            const appConfig = await getAppConfig();
+            const company = appConfig?.zatca?.company_name || '';
+            const posProfile = selectedPosProfile || '';
+            const userEmail = user?.email || '';
+
+            const synced = await pushPendingOpenShifts(db, {
+              userEmail,
+              company,
+              posProfile,
+            });
+
+            // If the currently active shift was synced, update Redux
+            if (currentShiftLocalId) {
+              const match = synced.find((s) => s.shiftLocalId === currentShiftLocalId);
+              if (match) {
+                dispatch(setShiftOpeningId(match.shiftOpeningId));
+              }
+            }
+
+            if (__DEV__) {
+              console.log('[ProtectedLayout] Pending open shifts pushed successfully');
+            }
+          } catch (err) {
+            console.error('[ProtectedLayout] Failed to push pending open shifts:', err);
           }
-        })
-        .catch((err) => {
-          console.error('[ProtectedLayout] Failed to push pending customers:', err);
-        })
-        .finally(() => {
-          // Pull latest data from API (regardless of push result)
-          Promise.all([
-            syncAllProducts(db)
-              .then(() => {
-                if (__DEV__) {
-                  console.log('[ProtectedLayout] Products synced successfully');
-                }
-              })
-              .catch((err) => {
-                console.error('[ProtectedLayout] Failed to sync products:', err);
-              }),
-            syncAllCustomers(db)
-              .then(() => {
-                if (__DEV__) {
-                  console.log('[ProtectedLayout] Customers synced successfully');
-                }
-              })
-              .catch((err) => {
-                console.error('[ProtectedLayout] Failed to sync customers:', err);
-              }),
-          ]);
-        });
+        })(),
+      ]).finally(() => {
+        // Pull latest data from API (regardless of push result)
+        Promise.all([
+          syncAllProducts(db)
+            .then(() => {
+              if (__DEV__) {
+                console.log('[ProtectedLayout] Products synced successfully');
+              }
+            })
+            .catch((err) => {
+              console.error('[ProtectedLayout] Failed to sync products:', err);
+            }),
+          syncAllCustomers(db)
+            .then(() => {
+              if (__DEV__) {
+                console.log('[ProtectedLayout] Customers synced successfully');
+              }
+            })
+            .catch((err) => {
+              console.error('[ProtectedLayout] Failed to sync customers:', err);
+            }),
+        ]);
+      });
     }
   }, []);
 
