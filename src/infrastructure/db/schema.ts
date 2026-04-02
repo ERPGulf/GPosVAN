@@ -137,3 +137,81 @@ export const shiftIdSequence = sqliteTable('ShiftsIdSequence', {
   userId: text('user_id').primaryKey(),
   sequence: integer('sequence').default(0),
 });
+
+// Invoice table
+export const invoices = sqliteTable('Invoice', {
+  id: text('id').primaryKey(), // used as sync id
+  invoiceId: text('invoice_id'), // server-side id after ERP sync
+  invoiceNo: text('invoice_no'), // generated for ZATCA XML
+  customerId: text('customer_id'), // soft FK → customers
+  customerPurchaseOrder: integer('customer_purchase_order').default(0), //invoice lineItem count
+  discount: real('discount').default(0),
+  previousInvoiceHash: text('previous_invoice_hash'),
+  isSynced: integer('is_synced', { mode: 'boolean' }).default(false),
+  dateTime: integer('date_time', { mode: 'timestamp' }).notNull(),
+  syncDateTime: integer('sync_date_time', { mode: 'timestamp' }),
+  posProfile: text('pos_profile'),
+  loyalityCustomerName: text('loyality_customer_name'),
+  loyalityCustomerMobile: text('loyality_customer_mobile'),
+  shiftId: text('shift_id'), // soft FK → shifts
+  userId: text('user_id'), // soft FK → users
+  isError: integer('is_error', { mode: 'boolean' }).default(false),
+  isErrorSynced: integer('is_error_synced', { mode: 'boolean' }).default(false),
+  errorSyncTime: integer('error_sync_time', { mode: 'timestamp' }),
+  errorMessage: text('error_message'),
+});
+
+// Invoice relations
+export const invoicesRelations = relations(invoices, ({ many }) => ({
+  items: many(invoiceItems),
+  payments: many(invoicePayments),
+}));
+
+// InvoiceItems table
+export const invoiceItems = sqliteTable('InvoiceItems', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  itemCode: text('item_code'),
+  itemName: text('item_name'),
+  quantity: real('quantity').default(0),
+  rate: real('rate').default(0),
+  taxPercentage: real('tax_percentage').default(0),
+  unitOfMeasure: text('unit_of_measure'),
+  invoiceEntityId: text('invoice_entity_id').references(() => invoices.id),
+  discountType: text('discount_type'),
+  minQty: integer('min_qty').default(0),
+  maxQty: integer('max_qty').default(0),
+  discountValue: real('discount_value').default(0),
+});
+
+// InvoiceItems relations
+export const invoiceItemsRelations = relations(invoiceItems, ({ one }) => ({
+  invoice: one(invoices, {
+    fields: [invoiceItems.invoiceEntityId],
+    references: [invoices.id],
+  }),
+}));
+
+// InvoicePayments table
+export const invoicePayments = sqliteTable('InvoicePayments', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  modeOfPayment: text('mode_of_payment'),
+  amount: real('amount').default(0),
+  invoiceEntityId: text('invoice_entity_id').references(() => invoices.id),
+  userId: text('user_id'),
+  transactionId: text('transaction_id'),
+  createAt: integer('create_at', { mode: 'timestamp' }),
+});
+
+// InvoicePayments relations
+export const invoicePaymentsRelations = relations(invoicePayments, ({ one }) => ({
+  invoice: one(invoices, {
+    fields: [invoicePayments.invoiceEntityId],
+    references: [invoices.id],
+  }),
+}));
+
+// InvoiceIdSequence table — single global row tracking the invoice counter
+export const invoiceIdSequence = sqliteTable('InvoiceIdSequence', {
+  id: integer('id').primaryKey(), // always row id = 1
+  sequence: integer('sequence').default(0),
+});

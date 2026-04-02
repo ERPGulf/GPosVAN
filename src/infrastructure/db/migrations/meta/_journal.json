@@ -15,6 +15,20 @@
       "when": 1743483900000,
       "tag": "0001_add_shifts_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1743517800000,
+      "tag": "0002_add_invoice_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1743520800000,
+      "tag": "0003_add_invoice_sequence",
+      "breakpoints": true
     }
   ]
 }
