@@ -209,3 +209,9 @@ export const invoicePaymentsRelations = relations(invoicePayments, ({ one }) => 
     references: [invoices.id],
   }),
 }));
+
+// InvoiceIdSequence table — single global row tracking the invoice counter
+export const invoiceIdSequence = sqliteTable('InvoiceIdSequence', {
+  id: integer('id').primaryKey(), // always row id = 1
+  sequence: integer('sequence').default(0),
+});
