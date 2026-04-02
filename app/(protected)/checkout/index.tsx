@@ -1,3 +1,5 @@
+import { selectUser } from '@/src/features/auth/authSlice';
+import { selectShiftLocalId } from '@/src/features/shifts/shiftSlice';
 import {
   clearCart,
   removeFromCart,
@@ -9,28 +11,27 @@ import { AddCustomerModal } from '@/src/features/customers/components/AddCustome
 import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
-import { selectUser } from '@/src/features/auth/authSlice';
-import { selectShiftId } from '@/src/features/shifts/shiftSlice';
+
 import { InvoiceQR } from '@/src/features/zatca/components/InvoiceQR';
 import { useCreateInvoice } from '@/src/features/zatca/hooks/useCreateInvoice';
+import { saveInvoiceFiles } from '@/src/features/zatca/services/invoiceFileStorage';
 import {
   getZatcaConfig,
   hydrateZatcaConfigFromStorage,
   setZatcaConfigFromBackend,
 } from '@/src/features/zatca/services/zatcaConfig';
-import { saveInvoiceFiles } from '@/src/features/zatca/services/invoiceFileStorage';
 import { getZatcaPayloadFromSecureStore } from '@/src/features/zatca/services/zatcaTestPayload';
-import { getAppConfig } from '@/src/services/configStore';
 import type { InvoiceParams } from '@/src/features/zatca/types';
 import { getNextInvoiceNo, saveInvoiceToDb } from '@/src/infrastructure/db/invoices.repository';
+import { getAppConfig } from '@/src/services/configStore';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { randomUUID } from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
-import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
 import { Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
@@ -66,7 +67,7 @@ export default function CheckoutPage() {
   const cartItems = useAppSelector(selectCartItems);
   const total = useAppSelector(selectTotal);
   const user = useAppSelector(selectUser);
-  const shiftId = useAppSelector(selectShiftId);
+  const shiftLocalId = useAppSelector(selectShiftLocalId);
   const selectedPosProfile = useAppSelector((state) => state.auth.selectedPosProfile);
   const { data: customers } = useCustomers();
   const { create: createZatcaInvoice, isLoading: isCreatingInvoice } = useCreateInvoice();
@@ -209,7 +210,7 @@ export default function CheckoutPage() {
         invoiceUUID: invoiceParams.invoiceUUID,
         invoiceNo,
         customerId: selectedCustomer?.id ?? 'WALK_IN',
-        shiftId: shiftId ?? null,
+        shiftId: shiftLocalId ?? null,
         userId: user?.id ?? null,
         posProfile: selectedPosProfile ?? null,
         previousInvoiceHash: previousInvoiceHash,
