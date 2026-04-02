@@ -144,6 +144,7 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
               userId: user?.id || '',
               username: user?.username || user?.email || 'unknown',
               openingCash: cash,
+              branch: selectedPosProfile || undefined,
             });
             dispatch(openShiftState(shiftLocalId));
             if (__DEV__) {

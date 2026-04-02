@@ -31,6 +31,7 @@ export const openShift = async (
     userId: string;
     username: string;
     openingCash: number;
+    branch?: string;
   },
 ): Promise<string> => {
   const shiftLocalId = generateShiftLocalId(params.username);
@@ -40,6 +41,7 @@ export const openShift = async (
     userId: params.userId,
     openingCash: params.openingCash,
     shiftStartDate: new Date(),
+    branch: params.branch,
   });
 
   return shiftLocalId;
