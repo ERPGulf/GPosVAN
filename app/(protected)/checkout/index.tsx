@@ -1,5 +1,5 @@
 import { selectUser } from '@/src/features/auth/authSlice';
-import { selectShiftLocalId } from '@/src/features/shifts/shiftSlice';
+import { selectShiftLocalId, selectShiftOpeningId } from '@/src/features/shifts/shiftSlice';
 import {
   clearCart,
   removeFromCart,
@@ -9,6 +9,7 @@ import {
 } from '@/src/features/cart/cartSlice';
 import { AddCustomerModal } from '@/src/features/customers/components/AddCustomerModal';
 import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
+import { formatDateTimeForApi, syncInvoiceToServer } from '@/src/features/invoices/services/invoiceApi.service';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
 
@@ -22,7 +23,7 @@ import {
 } from '@/src/features/zatca/services/zatcaConfig';
 import { getZatcaPayloadFromSecureStore } from '@/src/features/zatca/services/zatcaTestPayload';
 import type { InvoiceParams } from '@/src/features/zatca/types';
-import { getNextInvoiceNo, saveInvoiceToDb } from '@/src/infrastructure/db/invoices.repository';
+import { getNextInvoiceNo, markInvoiceAsSynced, saveInvoiceToDb } from '@/src/infrastructure/db/invoices.repository';
 import { getAppConfig } from '@/src/services/configStore';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,7 +35,7 @@ import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
-import { Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 
 type PaymentMethod = 'Cash/Card' | 'Cash' | 'Card';
@@ -68,6 +69,7 @@ export default function CheckoutPage() {
   const total = useAppSelector(selectTotal);
   const user = useAppSelector(selectUser);
   const shiftLocalId = useAppSelector(selectShiftLocalId);
+  const shiftOpeningId = useAppSelector(selectShiftOpeningId);
   const selectedPosProfile = useAppSelector((state) => state.auth.selectedPosProfile);
   const { data: customers } = useCustomers();
   const { create: createZatcaInvoice, isLoading: isCreatingInvoice } = useCreateInvoice();
@@ -535,6 +537,74 @@ export default function CheckoutPage() {
                         base64Png,
                       );
                       console.log(`Invoice files saved: ${xmlPath}, ${qrPngPath}`);
+
+                      // Fire-and-forget: sync invoice to server
+                      (async () => {
+                        try {
+                          if (!shiftOpeningId) {
+                            console.warn('[Checkout] shiftOpeningId is null — skipping invoice sync');
+                            Alert.alert('Sync Pending', 'Please sync open shift first. Invoice will remain unsynced.');
+                            return;
+                          }
+
+                          const invoiceData = await import('@/src/infrastructure/db/invoices.repository').then(
+                            (mod) => mod.getInvoiceForSync(db, generatedInvoice.invoiceUUID),
+                          );
+                          if (!invoiceData) {
+                            console.error('[Checkout] Invoice not found in DB for sync');
+                            return;
+                          }
+
+                          const appConfig = await getAppConfig();
+                          const phase = appConfig?.phase || '1';
+                          const machineName = process.env.EXPO_PUBLIC_MACHINE_NAME || 'UNKNOWN';
+
+                          // Build items JSON array
+                          const itemsJson = JSON.stringify(
+                            invoiceData.items.map((item) => ({
+                              item_code: item.itemCode || '',
+                              quantity: item.quantity || 0,
+                              rate: item.rate || 0,
+                              uom: item.unitOfMeasure || 'Nos',
+                              tax_rate: item.taxPercentage || 0,
+                            })),
+                          );
+
+                          // Build payments JSON array
+                          const paymentsJson = JSON.stringify(
+                            invoiceData.payments.map((p) => ({
+                              mode_of_payment: p.modeOfPayment || 'Cash',
+                              amount: (p.amount || 0).toFixed(2),
+                            })),
+                          );
+
+                          const serverId = await syncInvoiceToServer({
+                            customerName: selectedCustomer?.name || 'Walk In',
+                            customerPurchaseOrder: invoiceData.invoice.customerPurchaseOrder || 0,
+                            items: itemsJson,
+                            qrPngUri: qrPngPath,
+                            xmlUri: xmlPath,
+                            uniqueId: generatedInvoice.invoiceUUID,
+                            machineName,
+                            payments: paymentsJson,
+                            phase,
+                            posProfile: selectedPosProfile || '',
+                            offlineInvoiceNumber: invoiceData.invoice.invoiceNo || '',
+                            customOfflineCreationTime: formatDateTimeForApi(
+                              invoiceData.invoice.dateTime,
+                            ),
+                            posShift: shiftOpeningId,
+                          });
+
+                          // Update local DB with server invoice ID
+                          await markInvoiceAsSynced(db, generatedInvoice.invoiceUUID, serverId);
+                          console.log('[Checkout] Invoice synced, server ID:', serverId);
+                        } catch (syncErr) {
+                          if (__DEV__) {
+                            console.log('[Checkout] Invoice sync failed, will remain unsynced:', syncErr);
+                          }
+                        }
+                      })();
                     } catch (err) {
                       console.error('Failed to save invoice files:', err);
                     }

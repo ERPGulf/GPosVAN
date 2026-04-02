@@ -143,3 +143,51 @@ export async function saveInvoiceToDb(
     }
   });
 }
+
+// ─── Sync helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetch an invoice with its items and payments for sync purposes.
+ */
+export async function getInvoiceForSync(
+  db: ExpoSQLiteDatabase,
+  invoiceUUID: string,
+) {
+  const [invoice] = await db
+    .select()
+    .from(invoices)
+    .where(eq(invoices.id, invoiceUUID))
+    .limit(1);
+
+  if (!invoice) return null;
+
+  const items = await db
+    .select()
+    .from(invoiceItems)
+    .where(eq(invoiceItems.invoiceEntityId, invoiceUUID));
+
+  const payments = await db
+    .select()
+    .from(invoicePayments)
+    .where(eq(invoicePayments.invoiceEntityId, invoiceUUID));
+
+  return { invoice, items, payments };
+}
+
+/**
+ * Mark an invoice as synced and store the server-generated invoice ID.
+ */
+export async function markInvoiceAsSynced(
+  db: ExpoSQLiteDatabase,
+  invoiceUUID: string,
+  serverInvoiceId: string,
+): Promise<void> {
+  await db
+    .update(invoices)
+    .set({
+      isSynced: true,
+      invoiceId: serverInvoiceId,
+      syncDateTime: new Date(),
+    })
+    .where(eq(invoices.id, invoiceUUID));
+}
