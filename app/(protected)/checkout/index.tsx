@@ -1,5 +1,4 @@
 import { selectUser } from '@/src/features/auth/authSlice';
-import { selectShiftLocalId, selectShiftOpeningId } from '@/src/features/shifts/shiftSlice';
 import {
   clearCart,
   removeFromCart,
@@ -12,6 +11,7 @@ import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
 import { formatDateTimeForApi, syncInvoiceToServer } from '@/src/features/invoices/services/invoiceApi.service';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
+import { selectShiftLocalId, selectShiftOpeningId } from '@/src/features/shifts/shiftSlice';
 
 import { InvoiceQR } from '@/src/features/zatca/components/InvoiceQR';
 import { useCreateInvoice } from '@/src/features/zatca/hooks/useCreateInvoice';
@@ -486,12 +486,12 @@ export default function CheckoutPage() {
             <Ionicons name="chevron-forward" size={20} color="white" />
           </TouchableOpacity>
 
-          <TouchableOpacity
+          {/* <TouchableOpacity
             onPress={handleSaveAndClear}
             className="w-full bg-gray-200 py-3 rounded-xl items-center flex-row justify-center">
             <Ionicons name="save-outline" size={20} color="#374151" style={{ marginRight: 8 }} />
             <Text className="text-gray-700 font-semibold">Save and Clear</Text>
-          </TouchableOpacity>
+          </TouchableOpacity> */}
 
           <TouchableOpacity
             onPress={() => router.back()}

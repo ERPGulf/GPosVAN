@@ -175,9 +175,9 @@ export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onChec
 
         {showActions && (
           <View className="flex-row gap-3">
-            <TouchableOpacity className="flex-1 bg-gray-200 py-3 rounded-xl items-center">
+            {/* <TouchableOpacity className="flex-1 bg-gray-200 py-3 rounded-xl items-center">
               <Text className="font-semibold text-gray-700">Save</Text>
-            </TouchableOpacity>
+            </TouchableOpacity> */}
             <TouchableOpacity onPress={handleCheckoutPress} className="flex-1 bg-green-500 py-3 rounded-xl items-center">
               <Text className="font-semibold text-white">Checkout</Text>
             </TouchableOpacity>
