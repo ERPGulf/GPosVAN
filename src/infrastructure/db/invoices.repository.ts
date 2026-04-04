@@ -191,3 +191,34 @@ export async function markInvoiceAsSynced(
     })
     .where(eq(invoices.id, invoiceUUID));
 }
+
+/**
+ * Mark an invoice as having a sync error and store the error details.
+ */
+export async function markInvoiceSyncError(
+  db: ExpoSQLiteDatabase,
+  invoiceUUID: string,
+  error: unknown,
+): Promise<void> {
+  let errorMessage: string;
+  try {
+    if (error && typeof error === 'object' && 'response' in error) {
+      // Axios-style error — store the server response body
+      errorMessage = JSON.stringify((error as any).response?.data ?? (error as any).message);
+    } else if (error instanceof Error) {
+      errorMessage = JSON.stringify({ message: error.message });
+    } else {
+      errorMessage = JSON.stringify(error);
+    }
+  } catch {
+    errorMessage = String(error);
+  }
+
+  await db
+    .update(invoices)
+    .set({
+      isError: true,
+      errorMessage,
+    })
+    .where(eq(invoices.id, invoiceUUID));
+}

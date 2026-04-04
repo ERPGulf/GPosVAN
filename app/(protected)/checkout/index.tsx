@@ -23,7 +23,7 @@ import {
 } from '@/src/features/zatca/services/zatcaConfig';
 import { getZatcaPayloadFromSecureStore } from '@/src/features/zatca/services/zatcaTestPayload';
 import type { InvoiceParams } from '@/src/features/zatca/types';
-import { getNextInvoiceNo, markInvoiceAsSynced, saveInvoiceToDb } from '@/src/infrastructure/db/invoices.repository';
+import { getNextInvoiceNo, markInvoiceAsSynced, markInvoiceSyncError, saveInvoiceToDb } from '@/src/infrastructure/db/invoices.repository';
 import { getAppConfig } from '@/src/services/configStore';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
@@ -602,6 +602,12 @@ export default function CheckoutPage() {
                         } catch (syncErr) {
                           if (__DEV__) {
                             console.log('[Checkout] Invoice sync failed, will remain unsynced:', syncErr);
+                          }
+                          // Persist the error to the local DB
+                          try {
+                            await markInvoiceSyncError(db, generatedInvoice.invoiceUUID, syncErr);
+                          } catch (dbErr) {
+                            console.error('[Checkout] Failed to save sync error to DB:', dbErr);
                           }
                         }
                       })();
