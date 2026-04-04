@@ -29,10 +29,13 @@ const shiftSlice = createSlice({
     setShiftOpeningId(state, action: PayloadAction<string>) {
       state.shiftOpeningId = action.payload;
     },
+    resetShiftState() {
+      return initialState;
+    },
   },
 });
 
-export const { openShiftState, closeShiftState, setShiftOpeningId } = shiftSlice.actions;
+export const { openShiftState, closeShiftState, setShiftOpeningId, resetShiftState } = shiftSlice.actions;
 export default shiftSlice.reducer;
 
 export const selectShiftLocalId = (state: RootState) => state.shift.shiftLocalId;

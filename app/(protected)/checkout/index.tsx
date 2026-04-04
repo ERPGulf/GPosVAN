@@ -35,7 +35,7 @@ import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 
 type PaymentMethod = 'Cash/Card' | 'Cash' | 'Card';
@@ -543,7 +543,7 @@ export default function CheckoutPage() {
                         try {
                           if (!shiftOpeningId) {
                             console.warn('[Checkout] shiftOpeningId is null — skipping invoice sync');
-                            Alert.alert('Sync Pending', 'Please sync open shift first. Invoice will remain unsynced.');
+                            // Alert.alert('Sync Pending', 'Please sync open shift first. Invoice will remain unsynced.');
                             return;
                           }
 
