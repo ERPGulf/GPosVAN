@@ -1,13 +1,23 @@
 import type { AppConfig } from '@/src/features/app/types';
+import { useSyncUsers } from '@/src/features/auth';
+import { selectUser } from '@/src/features/auth/authSlice';
+import {
+    pushPendingCustomers,
+    syncAllCustomers,
+} from '@/src/infrastructure/db/customers.repository';
+import { syncAllProducts } from '@/src/infrastructure/db/products.repository';
 import {
     clearAppConfig,
     getAppConfig,
     saveAppConfig,
 } from '@/src/services/configStore';
+import { useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
+import { drizzle } from 'drizzle-orm/expo-sqlite';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
-import React, { useEffect, useState } from 'react';
+import { openDatabaseSync } from 'expo-sqlite';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -20,6 +30,9 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+
+const expoDb = openDatabaseSync('van_pos.db', { enableChangeListener: true });
+const db = drizzle(expoDb);
 
 /**
  * Minimal validation for AppConfig shape.
@@ -78,7 +91,91 @@ async function processConfigJson(content: string): Promise<string | null> {
     return null;
 }
 
+// ─── Sync status types ────────────────────────────────────────────────
+type SyncKey = 'products' | 'customers' | 'users';
+type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
+
+// ─── User Profile Detail Row ──────────────────────────────────────────
+function ProfileRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
+    return (
+        <View className="flex-row items-center py-3 border-b border-gray-50">
+            <View className="w-9 h-9 bg-gray-50 rounded-lg items-center justify-center mr-3">
+                <Ionicons name={icon} size={18} color="#6b7280" />
+            </View>
+            <View className="flex-1">
+                <Text className="text-xs text-gray-400 uppercase tracking-wider">{label}</Text>
+                <Text className="text-base text-gray-800 mt-0.5">{value}</Text>
+            </View>
+        </View>
+    );
+}
+
+// ─── Sync Button ──────────────────────────────────────────────────────
+function SyncButton({
+    icon,
+    label,
+    status,
+    onPress,
+}: {
+    icon: keyof typeof Ionicons.glyphMap;
+    label: string;
+    status: SyncStatus;
+    onPress: () => void;
+}) {
+    const isSyncing = status === 'syncing';
+    const isSuccess = status === 'success';
+    const isError = status === 'error';
+
+    return (
+        <TouchableOpacity
+            onPress={onPress}
+            disabled={isSyncing}
+            className={`flex-row items-center rounded-xl px-4 py-3.5 border ${isSyncing
+                ? 'border-gray-200 bg-gray-50'
+                : isSuccess
+                    ? 'border-green-200 bg-green-50'
+                    : isError
+                        ? 'border-red-200 bg-red-50'
+                        : 'border-gray-200 bg-white'
+                }`}
+        >
+            {isSyncing ? (
+                <ActivityIndicator size="small" color="#22c55e" />
+            ) : isSuccess ? (
+                <Ionicons name="checkmark-circle" size={22} color="#22c55e" />
+            ) : isError ? (
+                <Ionicons name="close-circle" size={22} color="#ef4444" />
+            ) : (
+                <Ionicons name={icon} size={22} color="#6b7280" />
+            )}
+            <Text
+                className={`font-medium text-sm ml-3 flex-1 ${isSyncing
+                    ? 'text-gray-400'
+                    : isSuccess
+                        ? 'text-green-600'
+                        : isError
+                            ? 'text-red-600'
+                            : 'text-gray-700'
+                    }`}
+            >
+                {isSyncing ? `Syncing ${label}...` : label}
+            </Text>
+            {!isSyncing && (
+                <Ionicons name="sync-outline" size={18} color={isSuccess ? '#22c55e' : isError ? '#ef4444' : '#9ca3af'} />
+            )}
+        </TouchableOpacity>
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════════════════
+
 export default function SettingsPage() {
+    // ── User profile from Redux ──────────────────────────────────────
+    const user = useAppSelector(selectUser);
+
+    // ── App config state ─────────────────────────────────────────────
     const [currentConfig, setCurrentConfig] = useState<AppConfig | null>(null);
     const [isLoadingConfig, setIsLoadingConfig] = useState(true);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -92,6 +189,14 @@ export default function SettingsPage() {
 
     // Upload state
     const [uploading, setUploading] = useState(false);
+
+    // ── Sync state ───────────────────────────────────────────────────
+    const [syncStatus, setSyncStatus] = useState<Record<SyncKey, SyncStatus>>({
+        products: 'idle',
+        customers: 'idle',
+        users: 'idle',
+    });
+    const { sync: syncUsersFromApi } = useSyncUsers();
 
     // Load current config
     useEffect(() => {
@@ -123,7 +228,60 @@ export default function SettingsPage() {
         setTimeout(() => setErrorMessage(null), 5000);
     };
 
-    // --- Re-upload JSON file ---
+    // ── Sync handlers ────────────────────────────────────────────────
+    const updateSyncStatus = (key: SyncKey, status: SyncStatus) => {
+        setSyncStatus((prev) => ({ ...prev, [key]: status }));
+        if (status === 'success' || status === 'error') {
+            setTimeout(() => {
+                setSyncStatus((prev) => ({ ...prev, [key]: 'idle' }));
+            }, 3000);
+        }
+    };
+
+    const handleSyncProducts = useCallback(async () => {
+        updateSyncStatus('products', 'syncing');
+        try {
+            await syncAllProducts(db);
+            updateSyncStatus('products', 'success');
+        } catch (err) {
+            console.error('[Settings] Product sync failed:', err);
+            updateSyncStatus('products', 'error');
+        }
+    }, []);
+
+    const handleSyncCustomers = useCallback(async () => {
+        updateSyncStatus('customers', 'syncing');
+        try {
+            await pushPendingCustomers(db);
+            await syncAllCustomers(db);
+            updateSyncStatus('customers', 'success');
+        } catch (err) {
+            console.error('[Settings] Customer sync failed:', err);
+            updateSyncStatus('customers', 'error');
+        }
+    }, []);
+
+    const handleSyncUsers = useCallback(async () => {
+        updateSyncStatus('users', 'syncing');
+        try {
+            await syncUsersFromApi();
+            updateSyncStatus('users', 'success');
+        } catch (err) {
+            console.error('[Settings] User sync failed:', err);
+            updateSyncStatus('users', 'error');
+        }
+    }, [syncUsersFromApi]);
+
+    const isSyncingAny =
+        syncStatus.products === 'syncing' ||
+        syncStatus.customers === 'syncing' ||
+        syncStatus.users === 'syncing';
+
+    const handleSyncAll = useCallback(async () => {
+        await Promise.all([handleSyncProducts(), handleSyncCustomers(), handleSyncUsers()]);
+    }, [handleSyncProducts, handleSyncCustomers, handleSyncUsers]);
+
+    // ── Config handlers (preserved from original) ────────────────────
     const handleReupload = async () => {
         try {
             setUploading(true);
@@ -170,7 +328,6 @@ export default function SettingsPage() {
         }
     };
 
-    // --- Edit current config ---
     const openEditModal = () => {
         if (currentConfig) {
             setEditJson(JSON.stringify(currentConfig, null, 2));
@@ -209,7 +366,6 @@ export default function SettingsPage() {
         }
     };
 
-    // --- Reset config ---
     const handleReset = () => {
         Alert.alert(
             'Reset Configuration',
@@ -235,6 +391,7 @@ export default function SettingsPage() {
         );
     };
 
+    // ── Loading state ────────────────────────────────────────────────
     if (isLoadingConfig) {
         return (
             <View className="flex-1 items-center justify-center">
@@ -244,13 +401,14 @@ export default function SettingsPage() {
         );
     }
 
+    // ── Render ───────────────────────────────────────────────────────
     return (
         <ScrollView className="flex-1 bg-gray-50">
             <View className="p-6 max-w-2xl self-center w-full">
                 {/* Page Header */}
                 <Text className="text-2xl font-bold text-gray-800 mb-1">Settings</Text>
                 <Text className="text-gray-500 mb-6">
-                    Manage your app configuration
+                    Manage your app configuration & data syncing
                 </Text>
 
                 {/* Success Message */}
@@ -271,7 +429,138 @@ export default function SettingsPage() {
                     </View>
                 )}
 
-                {/* Configuration Section */}
+                {/* ═══ 1. USER PROFILE SECTION ═══ */}
+                {/* 
+                <View className="p-5 border-b border-gray-100">
+                    <View className="flex-row items-center">
+                        <View className="w-10 h-10 bg-blue-100 rounded-xl items-center justify-center mr-3">
+                            <Ionicons name="person-outline" size={22} color="#3b82f6" />
+                        </View>
+                        <View className="flex-1">
+                            <Text className="text-lg font-semibold text-gray-800">
+                                User Profile
+                            </Text>
+                            <Text className="text-gray-400 text-sm">
+                                {user ? (user.cashierName || user.username || 'Logged in') : 'No user logged in'}
+                            </Text>
+                        </View>
+                    </View>
+                </View>
+
+                <View className="px-5 pb-4">
+                    {user ? (
+                        <>
+                            {(user.cashierName || user.username) && (
+                                <ProfileRow
+                                    icon="person-circle-outline"
+                                    label="Name"
+                                    value={user.cashierName || user.username || '—'}
+                                />
+                            )}
+                            {user.email && (
+                                <ProfileRow
+                                    icon="mail-outline"
+                                    label="Email"
+                                    value={user.email}
+                                />
+                            )}
+                            {user.shopName && (
+                                <ProfileRow
+                                    icon="storefront-outline"
+                                    label="Shop Name"
+                                    value={user.shopName}
+                                />
+                            )}
+                            {user.address && (
+                                <ProfileRow
+                                    icon="location-outline"
+                                    label="Address"
+                                    value={user.address}
+                                />
+                            )}
+                            <ProfileRow
+                                icon="shield-checkmark-outline"
+                                label="Role"
+                                value={user.isAdmin ? 'Administrator' : 'Cashier'}
+                            />
+                            {user.posProfile && user.posProfile.length > 0 && (
+                                <ProfileRow
+                                    icon="briefcase-outline"
+                                    label="POS Profile"
+                                    value={user.posProfile.join(', ')}
+                                />
+                            )}
+                        </>
+                    ) : (
+                        <View className="py-6 items-center">
+                            <Ionicons name="person-outline" size={40} color="#d1d5db" />
+                            <Text className="text-gray-400 mt-2 text-sm">No user data available</Text>
+                        </View>
+                    )}
+                </View>
+                */}
+                {/* ═══ 3. BACKGROUND SYNCING SECTION ═══ */}
+                <View className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-6">
+                    {/* Section Header */}
+                    <View className="p-5 border-b border-gray-100">
+                        <View className="flex-row items-center">
+                            <View className="w-10 h-10 bg-purple-100 rounded-xl items-center justify-center mr-3">
+                                <Ionicons name="sync-outline" size={22} color="#8b5cf6" />
+                            </View>
+                            <View className="flex-1">
+                                <Text className="text-lg font-semibold text-gray-800">
+                                    Background Syncing
+                                </Text>
+                                <Text className="text-gray-400 text-sm">
+                                    Sync data between device and server
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
+
+                    {/* Sync Buttons */}
+                    <View className="p-5 gap-3">
+                        <SyncButton
+                            icon="cube-outline"
+                            label="Products"
+                            status={syncStatus.products}
+                            onPress={handleSyncProducts}
+                        />
+                        <SyncButton
+                            icon="people-outline"
+                            label="Customers"
+                            status={syncStatus.customers}
+                            onPress={handleSyncCustomers}
+                        />
+                        <SyncButton
+                            icon="person-outline"
+                            label="Users"
+                            status={syncStatus.users}
+                            onPress={handleSyncUsers}
+                        />
+
+                        {/* Sync All */}
+                        <TouchableOpacity
+                            onPress={handleSyncAll}
+                            disabled={isSyncingAny}
+                            className={`flex-row items-center justify-center rounded-xl px-5 py-4 mt-1 ${isSyncingAny
+                                ? 'bg-purple-300'
+                                : 'bg-purple-500'
+                                }`}
+                        >
+                            {isSyncingAny ? (
+                                <ActivityIndicator color="white" />
+                            ) : (
+                                <Ionicons name="cloud-download-outline" size={22} color="white" />
+                            )}
+                            <Text className="text-white font-semibold text-base ml-3">
+                                {isSyncingAny ? 'Syncing All...' : 'Sync All Data'}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+
+                {/* ═══ 2. APP CONFIGURATION SECTION ═══ */}
                 <View className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-6">
                     {/* Section Header */}
                     <View className="p-5 border-b border-gray-100">
@@ -289,7 +578,6 @@ export default function SettingsPage() {
                             </View>
                         </View>
                     </View>
-
 
                     {/* Actions */}
                     <View className="p-5 gap-3">
@@ -330,8 +618,8 @@ export default function SettingsPage() {
                     </View>
                 </View>
 
-                {/* Danger Zone */}
-                <View className="bg-white rounded-2xl shadow-sm border border-red-100">
+                {/* ═══ DANGER ZONE ═══ */}
+                <View className="bg-white rounded-2xl shadow-sm border border-red-100 mb-8">
                     <View className="p-5 border-b border-red-50">
                         <View className="flex-row items-center">
                             <View className="w-10 h-10 bg-red-100 rounded-xl items-center justify-center mr-3">
@@ -437,6 +725,6 @@ export default function SettingsPage() {
                     </View>
                 </KeyboardAvoidingView>
             </Modal>
-        </ScrollView>
+        </ScrollView >
     );
 }
