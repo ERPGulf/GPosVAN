@@ -2,6 +2,7 @@
   "expo": {
     "name": "Van-pos",
     "slug": "Van-pos",
+    "owner": "erpgulf",
     "version": "1.0.0",
     "orientation": "landscape",
     "icon": "./assets/images/icon.png",
@@ -63,6 +64,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f396b4b9-d04b-4155-a84e-59f77895ca6b"
+      }
     }
   }
 }
