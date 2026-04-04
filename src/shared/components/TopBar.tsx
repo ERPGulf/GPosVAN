@@ -1,9 +1,9 @@
 import { logout, selectSelectedPosProfile, selectUser } from '@/src/features/auth/authSlice';
 import { CloseShiftModal } from '@/src/features/shifts/components/CloseShiftModal';
 import { OpenShiftModal } from '@/src/features/shifts/components/OpenShiftModal';
-import { buildBalanceDetails, formatDateForApi, syncOpenShiftToServer } from '@/src/features/shifts/services/shiftApi.service';
-import { closeShiftState, openShiftState, selectIsShiftOpen, selectShiftLocalId, setShiftOpeningId } from '@/src/features/shifts/shiftSlice';
-import { closeShift, markShiftOpeningSynced, openShift } from '@/src/infrastructure/db/shifts.repository';
+import { buildBalanceDetails, buildPaymentReconciliation, buildShiftDetails, formatDateForApi, syncCloseShiftToServer, syncOpenShiftToServer } from '@/src/features/shifts/services/shiftApi.service';
+import { closeShiftState, openShiftState, selectIsShiftOpen, selectShiftLocalId, selectShiftOpeningId, setShiftOpeningId } from '@/src/features/shifts/shiftSlice';
+import { closeShift, getShiftByLocalId, getShiftInvoiceDetails, getShiftInvoiceSyncStatus, markShiftClosingSynced, markShiftOpeningSynced, openShift } from '@/src/infrastructure/db/shifts.repository';
 import { getAppConfig } from '@/src/services/configStore';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -25,6 +25,7 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
   const selectedPosProfile = useAppSelector(selectSelectedPosProfile);
   const isShiftOpen = useAppSelector(selectIsShiftOpen);
   const shiftLocalId = useAppSelector(selectShiftLocalId);
+  const shiftOpeningId = useAppSelector(selectShiftOpeningId);
   const dispatch = useAppDispatch();
   const router = useRouter();
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -202,19 +203,75 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
             Alert.alert('Error', 'No active shift found.');
             return;
           }
+
+          // Capture state before clearing Redux
+          const currentShiftOpeningId = shiftOpeningId;
+          const currentShiftLocalId = shiftLocalId;
+          const closingDate = new Date(); // exact moment the button is pressed
+
           try {
             await closeShift(db, {
-              shiftLocalId,
+              shiftLocalId: currentShiftLocalId,
               closingCash: cash,
               closingCard: card,
+              closingDate,
             });
 
             dispatch(closeShiftState());
             setShowCloseShiftModal(false);
 
             if (__DEV__) {
-              console.log('[TopBar] Shift closed successfully:', shiftLocalId);
+              console.log('[TopBar] Shift closed successfully:', currentShiftLocalId);
             }
+
+            // Fire-and-forget: attempt immediate close-shift sync with server
+            (async () => {
+              try {
+                // Can't sync closing if opening was never synced (no server ID)
+                if (!currentShiftOpeningId) {
+                  if (__DEV__) {
+                    console.log('[TopBar] Close shift sync skipped — no shiftOpeningId yet');
+                  }
+                  return;
+                }
+
+                const appConfig = await getAppConfig();
+                const company = appConfig?.zatca?.company_name || '';
+
+                const details = await getShiftInvoiceDetails(db, currentShiftLocalId);
+                const invoiceSyncStatus = await getShiftInvoiceSyncStatus(db, currentShiftLocalId);
+
+                // Read the shift row to get the actual opening cash
+                const shiftRow = await getShiftByLocalId(db, currentShiftLocalId);
+                const openingCash = shiftRow?.openingCash ?? 0;
+
+                await syncCloseShiftToServer({
+                  pos_opening_entry: currentShiftOpeningId,
+                  company,
+                  period_end_date: formatDateForApi(closingDate),
+                  payment_reconciliation: buildPaymentReconciliation({
+                    openingCash,
+                    expectedCash: details.total_of_cash,
+                    closingCash: cash,
+                    expectedCard: details.total_of_bank,
+                    closingCard: card,
+                  }),
+                  details: buildShiftDetails(details),
+                  name: currentShiftOpeningId,
+                  created_invoice_status: invoiceSyncStatus,
+                });
+
+                await markShiftClosingSynced(db, currentShiftLocalId);
+
+                if (__DEV__) {
+                  console.log('[TopBar] Close shift synced with server:', currentShiftLocalId);
+                }
+              } catch (syncErr) {
+                if (__DEV__) {
+                  console.log('[TopBar] Close shift sync failed, will retry later:', syncErr);
+                }
+              }
+            })();
           } catch (err) {
             console.error('[TopBar] Failed to close shift:', err);
             Alert.alert('Error', 'Failed to close shift. Please try again.');

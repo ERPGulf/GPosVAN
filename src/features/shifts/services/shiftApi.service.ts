@@ -109,3 +109,123 @@ export const buildBalanceDetails = (openingCash: number): string => {
     },
   ]);
 };
+
+// ─── Closing Shift Types ─────────────────────────────────────────────────────
+
+export interface CloseShiftApiParams {
+  pos_opening_entry: string; // server shift opening ID (sync_id)
+  company: string;
+  period_end_date: string; // formatted as 'YYYY-MM-DD HH:mm:ss'
+  payment_reconciliation: string; // JSON string of payment array
+  details: string; // JSON string of shift details
+  name: string; // same as pos_opening_entry (server shift opening ID)
+  created_invoice_status: 'synced' | 'unsynced';
+}
+
+export interface ShiftInvoiceDetails {
+  number_of_invoices: number;
+  number_of_return_invoices: number;
+  total_of_invoices: number;
+  total_of_returns: number;
+  total_of_cash: number;
+  total_of_return_cash: number;
+  total_of_bank: number;
+  total_of_return_bank: number;
+}
+
+// ─── Closing Shift API ───────────────────────────────────────────────────────
+
+/**
+ * Sync a closed shift to the server.
+ */
+export const syncCloseShiftToServer = async (
+  params: CloseShiftApiParams,
+): Promise<void> => {
+  try {
+    const formData = new URLSearchParams();
+    formData.append('pos_opening_entry', params.pos_opening_entry);
+    formData.append('company', params.company);
+    formData.append('period_end_date', params.period_end_date);
+    formData.append('payment_reconciliation', params.payment_reconciliation);
+    formData.append('details', params.details);
+    formData.append('name', params.name);
+    formData.append('created_invoice_status', params.created_invoice_status);
+
+    if (__DEV__) {
+      console.log('[ShiftApi] Syncing close shift with params:', {
+        pos_opening_entry: params.pos_opening_entry,
+        company: params.company,
+        period_end_date: params.period_end_date,
+        payment_reconciliation: params.payment_reconciliation,
+        details: params.details,
+        name: params.name,
+        created_invoice_status: params.created_invoice_status,
+      });
+    }
+
+    await apiClient.post(
+      '/gpos.gpos.pos_shift.closing_shift',
+      formData.toString(),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      },
+    );
+
+    if (__DEV__) {
+      console.log('[ShiftApi] Close shift synced successfully');
+    }
+  } catch (error: any) {
+    if (__DEV__) {
+      console.error(
+        '[ShiftApi] Failed to sync close shift:',
+        error?.response?.data || error.message,
+      );
+    }
+    throw error;
+  }
+};
+
+/**
+ * Build the payment_reconciliation JSON string for the closing shift API.
+ */
+export const buildPaymentReconciliation = (params: {
+  openingCash: number;
+  expectedCash: number;
+  closingCash: number;
+  expectedCard: number;
+  closingCard: number;
+}): string => {
+  return JSON.stringify([
+    {
+      mode_of_payment: 'Cash',
+      opening_amount: params.openingCash.toFixed(2),
+      expected_amount: params.expectedCash.toFixed(2),
+      closing_amount: params.closingCash.toFixed(2),
+    },
+    {
+      mode_of_payment: 'Card',
+      opening_amount: '0.00',
+      expected_amount: params.expectedCard.toFixed(2),
+      closing_amount: params.closingCard.toFixed(2),
+    },
+  ]);
+};
+
+/**
+ * Build the details JSON string for the closing shift API.
+ * Return-related fields are hardcoded to 0 (no return feature yet).
+ */
+export const buildShiftDetails = (details: ShiftInvoiceDetails): string => {
+  return JSON.stringify({
+    number_of_invoices: details.number_of_invoices,
+    number_of_return_invoices: 0,
+    total_of_invoices: details.total_of_invoices,
+    total_of_returns: 0,
+    total_of_cash: details.total_of_cash,
+    total_of_return_cash: 0,
+    total_of_bank: details.total_of_bank,
+    total_of_return_bank: 0,
+  });
+};
