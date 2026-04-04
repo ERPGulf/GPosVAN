@@ -5,17 +5,27 @@ import {
     pushPendingCustomers,
     syncAllCustomers,
 } from '@/src/infrastructure/db/customers.repository';
+import {
+    pushErroredInvoices,
+    pushPendingInvoices,
+} from '@/src/infrastructure/db/invoices.repository';
 import { syncAllProducts } from '@/src/infrastructure/db/products.repository';
+import {
+    pushPendingCloseShifts,
+    pushPendingOpenShifts,
+} from '@/src/infrastructure/db/shifts.repository';
 import {
     clearAppConfig,
     getAppConfig,
     saveAppConfig,
 } from '@/src/services/configStore';
-import { useAppSelector } from '@/src/store/hooks';
+import { selectShiftLocalId, setShiftOpeningId } from '@/src/features/shifts/shiftSlice';
+import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
+import * as Network from 'expo-network';
 import { openDatabaseSync } from 'expo-sqlite';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -92,7 +102,7 @@ async function processConfigJson(content: string): Promise<string | null> {
 }
 
 // ─── Sync status types ────────────────────────────────────────────────
-type SyncKey = 'products' | 'customers' | 'users';
+type SyncKey = 'products' | 'customers' | 'users' | 'shiftsAndInvoices';
 type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 
 // ─── User Profile Detail Row ──────────────────────────────────────────
@@ -174,6 +184,8 @@ function SyncButton({
 export default function SettingsPage() {
     // ── User profile from Redux ──────────────────────────────────────
     const user = useAppSelector(selectUser);
+    const dispatch = useAppDispatch();
+    const currentShiftLocalId = useAppSelector(selectShiftLocalId);
 
     // ── App config state ─────────────────────────────────────────────
     const [currentConfig, setCurrentConfig] = useState<AppConfig | null>(null);
@@ -195,6 +207,7 @@ export default function SettingsPage() {
         products: 'idle',
         customers: 'idle',
         users: 'idle',
+        shiftsAndInvoices: 'idle',
     });
     const { sync: syncUsersFromApi } = useSyncUsers();
 
@@ -238,7 +251,22 @@ export default function SettingsPage() {
         }
     };
 
+    const checkInternet = async (): Promise<boolean> => {
+        try {
+            const state = await Network.getNetworkStateAsync();
+            if (!state.isConnected || !state.isInternetReachable) {
+                Alert.alert('No Internet', 'Please check your internet connection and try again.');
+                return false;
+            }
+            return true;
+        } catch {
+            Alert.alert('No Internet', 'Unable to verify network status. Please check your connection.');
+            return false;
+        }
+    };
+
     const handleSyncProducts = useCallback(async () => {
+        if (!(await checkInternet())) return;
         updateSyncStatus('products', 'syncing');
         try {
             await syncAllProducts(db);
@@ -250,6 +278,7 @@ export default function SettingsPage() {
     }, []);
 
     const handleSyncCustomers = useCallback(async () => {
+        if (!(await checkInternet())) return;
         updateSyncStatus('customers', 'syncing');
         try {
             await pushPendingCustomers(db);
@@ -262,6 +291,7 @@ export default function SettingsPage() {
     }, []);
 
     const handleSyncUsers = useCallback(async () => {
+        if (!(await checkInternet())) return;
         updateSyncStatus('users', 'syncing');
         try {
             await syncUsersFromApi();
@@ -272,14 +302,90 @@ export default function SettingsPage() {
         }
     }, [syncUsersFromApi]);
 
+    const handleSyncShiftsAndInvoices = useCallback(async () => {
+        if (!(await checkInternet())) return;
+        updateSyncStatus('shiftsAndInvoices', 'syncing');
+        try {
+            const appConfig = await getAppConfig();
+            const company = appConfig?.zatca?.company_name || '';
+            const posProfile = user?.posProfile?.[0] || '';
+            const userEmail = user?.email || '';
+            const phase = appConfig?.phase || '1';
+            const machineName = process.env.EXPO_PUBLIC_MACHINE_NAME || 'UNKNOWN';
+            const userId = user?.id || '';
+
+            // Step 1: Sync open shifts → get shiftOpeningId from server
+            console.log('[Settings] Step 1: Syncing open shifts...');
+            const syncedShifts = await pushPendingOpenShifts(db, {
+                userEmail,
+                company,
+                posProfile,
+            });
+            console.log(`[Settings] Open shifts synced: ${syncedShifts.length}`);
+
+            // Update Redux shiftOpeningId if the currently active shift was synced
+            if (currentShiftLocalId && syncedShifts.length > 0) {
+                const match = syncedShifts.find((s) => s.shiftLocalId === currentShiftLocalId);
+                if (match) {
+                    dispatch(setShiftOpeningId(match.shiftOpeningId));
+                    console.log(`[Settings] Redux shiftOpeningId updated: ${match.shiftOpeningId}`);
+                }
+            }
+
+            // Determine shiftOpeningId for invoice sync
+            // Use the most recently synced shift, or fall back to the first synced one
+            const shiftOpeningId = syncedShifts.length > 0
+                ? syncedShifts[syncedShifts.length - 1].shiftOpeningId
+                : '';
+
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+
+            // Step 2: Sync pending invoices (isSynced=false, isError=false)
+            console.log('[Settings] Step 2: Syncing pending invoices...');
+            const pendingCount = await pushPendingInvoices(db, {
+                posProfile,
+                shiftOpeningId,
+                phase,
+                machineName,
+            });
+            console.log(`[Settings] Pending invoices synced: ${pendingCount}`);
+
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+
+            // Step 3: Sync errored/uncleared invoices (isError=true, isErrorSynced=false)
+            console.log('[Settings] Step 3: Syncing errored invoices...');
+            const erroredCount = await pushErroredInvoices(db, {
+                posProfile,
+                shiftOpeningId,
+                phase,
+                machineName,
+                userId,
+            });
+            console.log(`[Settings] Errored invoices synced: ${erroredCount}`);
+
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+
+            // Step 4: Sync close shifts
+            console.log('[Settings] Step 4: Syncing close shifts...');
+            const closedShifts = await pushPendingCloseShifts(db, { company });
+            console.log(`[Settings] Close shifts synced: ${closedShifts.length}`);
+
+            updateSyncStatus('shiftsAndInvoices', 'success');
+        } catch (err) {
+            console.error('[Settings] Shifts & invoices sync failed:', err);
+            updateSyncStatus('shiftsAndInvoices', 'error');
+        }
+    }, [user]);
+
     const isSyncingAny =
         syncStatus.products === 'syncing' ||
         syncStatus.customers === 'syncing' ||
-        syncStatus.users === 'syncing';
+        syncStatus.users === 'syncing' ||
+        syncStatus.shiftsAndInvoices === 'syncing';
 
     const handleSyncAll = useCallback(async () => {
-        await Promise.all([handleSyncProducts(), handleSyncCustomers(), handleSyncUsers()]);
-    }, [handleSyncProducts, handleSyncCustomers, handleSyncUsers]);
+        await Promise.all([handleSyncProducts(), handleSyncCustomers(), handleSyncUsers(), handleSyncShiftsAndInvoices()]);
+    }, [handleSyncProducts, handleSyncCustomers, handleSyncUsers, handleSyncShiftsAndInvoices]);
 
     // ── Config handlers (preserved from original) ────────────────────
     const handleReupload = async () => {
@@ -537,6 +643,12 @@ export default function SettingsPage() {
                             label="Users"
                             status={syncStatus.users}
                             onPress={handleSyncUsers}
+                        />
+                        <SyncButton
+                            icon="receipt-outline"
+                            label="Shifts & Invoices"
+                            status={syncStatus.shiftsAndInvoices}
+                            onPress={handleSyncShiftsAndInvoices}
                         />
 
                         {/* Sync All */}
