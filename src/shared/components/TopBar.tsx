@@ -1,8 +1,9 @@
 import { logout, selectSelectedPosProfile, selectUser } from '@/src/features/auth/authSlice';
+import { CloseShiftModal } from '@/src/features/shifts/components/CloseShiftModal';
 import { OpenShiftModal } from '@/src/features/shifts/components/OpenShiftModal';
 import { buildBalanceDetails, formatDateForApi, syncOpenShiftToServer } from '@/src/features/shifts/services/shiftApi.service';
-import { closeShiftState, openShiftState, selectIsShiftOpen, setShiftOpeningId } from '@/src/features/shifts/shiftSlice';
-import { markShiftOpeningSynced, openShift } from '@/src/infrastructure/db/shifts.repository';
+import { closeShiftState, openShiftState, selectIsShiftOpen, selectShiftLocalId, setShiftOpeningId } from '@/src/features/shifts/shiftSlice';
+import { closeShift, markShiftOpeningSynced, openShift } from '@/src/infrastructure/db/shifts.repository';
 import { getAppConfig } from '@/src/services/configStore';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -23,10 +24,12 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
   const user = useAppSelector(selectUser);
   const selectedPosProfile = useAppSelector(selectSelectedPosProfile);
   const isShiftOpen = useAppSelector(selectIsShiftOpen);
+  const shiftLocalId = useAppSelector(selectShiftLocalId);
   const dispatch = useAppDispatch();
   const router = useRouter();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showOpenShiftModal, setShowOpenShiftModal] = useState(false);
+  const [showCloseShiftModal, setShowCloseShiftModal] = useState(false);
 
   // Extract initials
   const getInitials = (name?: string | null) => {
@@ -109,7 +112,7 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
                   className="flex-row items-center py-2"
                   onPress={() => {
                     setShowUserMenu(false);
-                    dispatch(closeShiftState());
+                    setShowCloseShiftModal(true);
                   }}
                 >
                   <MaterialCommunityIcons name="store-off-outline" size={20} color="#4b5563" />
@@ -186,6 +189,35 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
           } catch (err) {
             console.error('[TopBar] Failed to open shift:', err);
             Alert.alert('Error', 'Failed to open shift. Please try again.');
+          }
+        }}
+      />
+
+      {/* Close Shift Modal */}
+      <CloseShiftModal
+        visible={showCloseShiftModal}
+        onClose={() => setShowCloseShiftModal(false)}
+        onSubmit={async (cash, card) => {
+          if (!shiftLocalId) {
+            Alert.alert('Error', 'No active shift found.');
+            return;
+          }
+          try {
+            await closeShift(db, {
+              shiftLocalId,
+              closingCash: cash,
+              closingCard: card,
+            });
+
+            dispatch(closeShiftState());
+            setShowCloseShiftModal(false);
+
+            if (__DEV__) {
+              console.log('[TopBar] Shift closed successfully:', shiftLocalId);
+            }
+          } catch (err) {
+            console.error('[TopBar] Failed to close shift:', err);
+            Alert.alert('Error', 'Failed to close shift. Please try again.');
           }
         }}
       />

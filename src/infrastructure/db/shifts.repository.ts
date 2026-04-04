@@ -1,11 +1,11 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { ExpoSQLiteDatabase } from 'drizzle-orm/expo-sqlite';
 import {
   buildBalanceDetails,
   formatDateForApi,
   syncOpenShiftToServer,
 } from '../../features/shifts/services/shiftApi.service';
-import { shifts } from './schema';
+import { invoicePayments, invoices, shifts } from './schema';
 
 /**
  * Generate a shift local ID in the format: username-yyyyMMdd-MachineId
@@ -139,3 +139,61 @@ export const pushPendingOpenShifts = async (
   return synced;
 };
 
+/**
+ * Close a shift:
+ * 1. Calculate expected cash/card from invoice payments for this shift.
+ * 2. Update the shift row with closing amounts, expected amounts, date, and mark closed.
+ */
+export const closeShift = async (
+  db: ExpoSQLiteDatabase,
+  params: {
+    shiftLocalId: string;
+    closingCash: number;
+    closingCard: number;
+  },
+): Promise<void> => {
+  // Sum up all invoice-payment amounts for this shift, grouped by mode of payment.
+  // invoices.shiftId stores the shiftLocalId.
+  const rows = await db
+    .select({
+      mode: invoicePayments.modeOfPayment,
+      total: sql<number>`COALESCE(SUM(${invoicePayments.amount}), 0)`,
+    })
+    .from(invoicePayments)
+    .innerJoin(invoices, eq(invoicePayments.invoiceEntityId, invoices.id))
+    .where(eq(invoices.shiftId, params.shiftLocalId))
+    .groupBy(invoicePayments.modeOfPayment);
+
+  let expectedCash = 0;
+  let expectedCard = 0;
+
+  for (const row of rows) {
+    if (row.mode === 'Cash') {
+      expectedCash = Number(row.total) || 0;
+    } else if (row.mode === 'Card') {
+      expectedCard = Number(row.total) || 0;
+    }
+  }
+
+  if (__DEV__) {
+    console.log('[ShiftsRepository] Closing shift:', {
+      shiftLocalId: params.shiftLocalId,
+      closingCash: params.closingCash,
+      closingCard: params.closingCard,
+      expectedCash,
+      expectedCard,
+    });
+  }
+
+  await db
+    .update(shifts)
+    .set({
+      closingCash: params.closingCash,
+      closingCard: params.closingCard,
+      closingExpectedCash: expectedCash,
+      closingExpectedCard: expectedCard,
+      closingShiftDate: new Date(),
+      isShiftClosed: true,
+    })
+    .where(eq(shifts.shiftLocalId, params.shiftLocalId));
+};
