@@ -19,6 +19,7 @@ import { useCallback } from 'react';
 export const useProducts = () => {
   const db = useSQLiteContext();
   const drizzleDb = drizzle(db);
+  const queryClient = useQueryClient();
 
   return useQuery({
     queryKey: ['products'],
@@ -26,6 +27,11 @@ export const useProducts = () => {
       try {
         // Try to sync from API
         await syncAllProducts(drizzleDb);
+        
+        // Invalidate related queries so they refetch from the updated local database
+        queryClient.invalidateQueries({ queryKey: ['categories'] });
+        queryClient.invalidateQueries({ queryKey: ['barcodes'] });
+        queryClient.invalidateQueries({ queryKey: ['local-products'] });
       } catch (error) {
         // API failed (likely offline) - log but don't throw
         console.log('Product sync failed, using local data:', error);

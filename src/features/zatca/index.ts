@@ -3,6 +3,12 @@ export { InvoiceQR } from './components/InvoiceQR';
 export { useCreateInvoice } from './hooks/useCreateInvoice';
 export { createInvoice } from './services/invoiceService';
 export {
+  deleteInvoiceFiles,
+  listSavedInvoiceUUIDs,
+  readInvoiceFiles,
+  saveInvoiceFiles,
+} from './services/invoiceFileStorage';
+export {
   getZatcaConfig,
   hydrateZatcaConfigFromStorage,
   normalizeBackendZatcaConfig,

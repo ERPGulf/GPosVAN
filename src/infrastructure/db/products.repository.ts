@@ -1,7 +1,7 @@
 import { fetchProducts } from '@/src/features/products/services/productApi.service';
 import { ProductWithUom } from '@/src/features/products/types/product.types';
 import { ApiItemGroup, GetItemsResponse } from '@/src/features/products/types/productApi.types';
-import { eq, getTableColumns, sql, SQL } from 'drizzle-orm';
+import { and, eq, getTableColumns, sql, SQL } from 'drizzle-orm';
 import { ExpoSQLiteDatabase } from 'drizzle-orm/expo-sqlite';
 import { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { barcodes, categories, products, unitOfMeasures } from './schema';
@@ -226,14 +226,15 @@ export const getProductsWithUom = async (db: ExpoSQLiteDatabase): Promise<Produc
       isQuantityEditable: unitOfMeasures.isQuantityEditable,
     })
     .from(products)
-    .innerJoin(unitOfMeasures, eq(products.id, unitOfMeasures.productId));
+    .innerJoin(unitOfMeasures, eq(products.id, unitOfMeasures.productId))
+    .where(eq(products.isDisabled, false));
 };
 
 /**
  * Get all products from the local database (flat, no joins).
  */
 export const getAllProducts = async (db: ExpoSQLiteDatabase) => {
-  return db.select().from(products);
+  return db.select().from(products).where(eq(products.isDisabled, false));
 };
 
 /**
@@ -247,14 +248,17 @@ export const getAllBarcodes = async (db: ExpoSQLiteDatabase) => {
  * Get all categories from the local database.
  */
 export const getAllCategories = async (db: ExpoSQLiteDatabase) => {
-  return db.select().from(categories);
+  return db.select().from(categories).where(eq(categories.isDisabled, false));
 };
 
 /**
  * Get products by category ID.
  */
 export const getProductsByCategory = async (db: ExpoSQLiteDatabase, categoryId: string) => {
-  return db.select().from(products).where(eq(products.categoryId, categoryId));
+  return db
+    .select()
+    .from(products)
+    .where(and(eq(products.categoryId, categoryId), eq(products.isDisabled, false)));
 };
 
 /**

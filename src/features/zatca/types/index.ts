@@ -27,7 +27,7 @@ export interface ZatcaConfig {
 }
 
 export interface InvoiceCustomer {
-  id: string;
+  id: string | null;
   name: string | null;
   phoneNo: string | null;
   taxId?: string | null;

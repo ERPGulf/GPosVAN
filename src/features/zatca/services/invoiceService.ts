@@ -30,6 +30,7 @@ import {
   buildBaseInvoiceXml,
   buildSignedPropertiesObject,
   buildUBLExtension,
+  calculateInvoiceTaxBreakdown,
   insertSignedPropertiesObject,
   insertUBLExtension,
   updateQRData,
@@ -232,26 +233,23 @@ export function createInvoice(params: InvoiceParams, config: ZatcaConfig): Invoi
       privateKeyLength: privateKeyPem.length,
     });
 
-    // Compute totals (matching C# logic)
     const cartItems = params.cartItems;
-    let totalExcludeTax = 0;
-    for (const item of cartItems) {
-      const itemPrice = item.product.uomPrice ?? item.product.price ?? 0;
-      if (config.isTaxIncludedInPrice) {
-        const priceWithoutTax = itemPrice / (1 + (item.product.taxPercentage ?? 15) / 100);
-        totalExcludeTax += priceWithoutTax * item.quantity;
-      } else {
-        totalExcludeTax += itemPrice * item.quantity;
-      }
-    }
-
-    const tax = round2((totalExcludeTax * 15) / 100);
+    const monetaryBreakdown = calculateInvoiceTaxBreakdown(
+      cartItems,
+      config.isTaxIncludedInPrice,
+      params.discount,
+    );
+    const totalExcludeTax = monetaryBreakdown.totalExclusiveAmount;
+    const tax = monetaryBreakdown.totalTaxAmount;
 
     zatcaLogger.info('Invoice totals computed', {
       invoiceUUID,
       totalExcludeTax: round2(totalExcludeTax),
       tax,
-      discount: round2(params.discount),
+      discount: monetaryBreakdown.allowanceAmount,
+      taxExclusiveAmount: monetaryBreakdown.taxExclusiveAmount,
+      taxInclusiveAmount: monetaryBreakdown.taxInclusiveAmount,
+      taxSubtotalCount: monetaryBreakdown.subtotals.length,
     });
 
     // Step 1: Build base XML
@@ -344,7 +342,7 @@ export function createInvoice(params: InvoiceParams, config: ZatcaConfig): Invoi
     xml = insertSignedPropertiesObject(xml, signedPropertiesObject);
 
     // Step 8: Compute QR data
-    const totalAmount = totalExcludeTax + tax;
+    const totalAmount = monetaryBreakdown.taxInclusiveAmount;
     const qrData = getQRString(
       config.abbr,
       config.taxId,

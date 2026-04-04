@@ -1,9 +1,17 @@
 import { logout, selectSelectedPosProfile, selectUser } from '@/src/features/auth/authSlice';
+import { CloseShiftModal } from '@/src/features/shifts/components/CloseShiftModal';
+import { OpenShiftModal } from '@/src/features/shifts/components/OpenShiftModal';
+import { buildBalanceDetails, buildPaymentReconciliation, buildShiftDetails, formatDateForApi, syncCloseShiftToServer, syncOpenShiftToServer } from '@/src/features/shifts/services/shiftApi.service';
+import { closeShiftState, openShiftState, selectIsShiftOpen, selectShiftLocalId, selectShiftOpeningId, setShiftOpeningId } from '@/src/features/shifts/shiftSlice';
+import { closeShift, getShiftByLocalId, getShiftInvoiceDetails, getShiftInvoiceSyncStatus, markShiftClosingSynced, markShiftOpeningSynced, openShift } from '@/src/infrastructure/db/shifts.repository';
+import { getAppConfig } from '@/src/services/configStore';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
-import { useRouter } from 'expo-router';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { drizzle } from 'drizzle-orm/expo-sqlite';
+import { useRouter } from 'expo-router';
+import { useSQLiteContext } from 'expo-sqlite';
 import React, { useState } from 'react';
-import { Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Text, TouchableOpacity, View } from 'react-native';
 
 interface TopBarProps {
   onMenuPress?: () => void;
@@ -11,11 +19,18 @@ interface TopBarProps {
 }
 
 export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
+  const sqliteDb = useSQLiteContext();
+  const db = drizzle(sqliteDb);
   const user = useAppSelector(selectUser);
   const selectedPosProfile = useAppSelector(selectSelectedPosProfile);
+  const isShiftOpen = useAppSelector(selectIsShiftOpen);
+  const shiftLocalId = useAppSelector(selectShiftLocalId);
+  const shiftOpeningId = useAppSelector(selectShiftOpeningId);
   const dispatch = useAppDispatch();
   const router = useRouter();
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showOpenShiftModal, setShowOpenShiftModal] = useState(false);
+  const [showCloseShiftModal, setShowCloseShiftModal] = useState(false);
 
   // Extract initials
   const getInitials = (name?: string | null) => {
@@ -71,7 +86,7 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
 
               <View className="h-px bg-gray-200 my-3" />
 
-              <TouchableOpacity 
+              <TouchableOpacity
                 className="flex-row items-center py-2"
                 onPress={() => {
                   setShowUserMenu(false);
@@ -81,8 +96,34 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
                 <MaterialCommunityIcons name="cog-outline" size={20} color="#4b5563" />
                 <Text className="ml-3 text-gray-700 font-medium text-base">Settings</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
+
+              {!isShiftOpen ? (
+                <TouchableOpacity
+                  className="flex-row items-center py-2"
+                  onPress={() => {
+                    setShowUserMenu(false);
+                    setShowOpenShiftModal(true);
+                  }}
+                >
+                  <MaterialCommunityIcons name="store-clock-outline" size={20} color="#4b5563" />
+                  <Text className="ml-3 text-gray-700 font-medium text-base">Open Shift</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  className="flex-row items-center py-2"
+                  onPress={() => {
+                    setShowUserMenu(false);
+                    setShowCloseShiftModal(true);
+                  }}
+                >
+                  <MaterialCommunityIcons name="store-off-outline" size={20} color="#4b5563" />
+                  <Text className="ml-3 text-gray-700 font-medium text-base">Close Shift</Text>
+                </TouchableOpacity>
+              )}
+
+              <View className="h-px bg-gray-200 my-1" />
+
+              <TouchableOpacity
                 className="flex-row items-center py-2 mt-1"
                 onPress={() => {
                   setShowUserMenu(false);
@@ -96,6 +137,147 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
           )}
         </View>
       </View>
+
+      {/* Open Shift Modal */}
+      <OpenShiftModal
+        visible={showOpenShiftModal}
+        onClose={() => setShowOpenShiftModal(false)}
+        onSubmit={async (cash) => {
+          try {
+            const shiftLocalId = await openShift(db, {
+              userId: user?.id || '',
+              username: user?.username || user?.email || 'unknown',
+              openingCash: cash,
+              branch: selectedPosProfile || undefined,
+            });
+            dispatch(openShiftState(shiftLocalId));
+            if (__DEV__) {
+              console.log('[TopBar] Shift opened locally:', shiftLocalId);
+            }
+            setShowOpenShiftModal(false);
+
+            // Fire-and-forget: attempt immediate sync with server
+            (async () => {
+              try {
+                const appConfig = await getAppConfig();
+                const company = appConfig?.zatca?.company_name || '';
+                const posProfile = selectedPosProfile || '';
+                const userEmail = user?.email || '';
+
+                const syncId = await syncOpenShiftToServer({
+                  name: shiftLocalId,
+                  period_start_date: formatDateForApi(new Date()),
+                  company,
+                  user: userEmail,
+                  pos_profile: posProfile,
+                  balance_details: buildBalanceDetails(cash),
+                });
+
+                // Update local DB and Redux with server sync_id
+                await markShiftOpeningSynced(db, shiftLocalId, syncId);
+                dispatch(setShiftOpeningId(syncId));
+
+                if (__DEV__) {
+                  console.log('[TopBar] Shift synced with server, sync_id:', syncId);
+                }
+              } catch (syncErr) {
+                // Sync failed (offline or error) — will be retried on next app launch
+                if (__DEV__) {
+                  console.log('[TopBar] Shift sync failed, will retry later:', syncErr);
+                }
+              }
+            })();
+          } catch (err) {
+            console.error('[TopBar] Failed to open shift:', err);
+            Alert.alert('Error', 'Failed to open shift. Please try again.');
+          }
+        }}
+      />
+
+      {/* Close Shift Modal */}
+      <CloseShiftModal
+        visible={showCloseShiftModal}
+        onClose={() => setShowCloseShiftModal(false)}
+        onSubmit={async (cash, card) => {
+          if (!shiftLocalId) {
+            Alert.alert('Error', 'No active shift found.');
+            return;
+          }
+
+          // Capture state before clearing Redux
+          const currentShiftOpeningId = shiftOpeningId;
+          const currentShiftLocalId = shiftLocalId;
+          const closingDate = new Date(); // exact moment the button is pressed
+
+          try {
+            await closeShift(db, {
+              shiftLocalId: currentShiftLocalId,
+              closingCash: cash,
+              closingCard: card,
+              closingDate,
+            });
+
+            dispatch(closeShiftState());
+            setShowCloseShiftModal(false);
+
+            if (__DEV__) {
+              console.log('[TopBar] Shift closed successfully:', currentShiftLocalId);
+            }
+
+            // Fire-and-forget: attempt immediate close-shift sync with server
+            (async () => {
+              try {
+                // Can't sync closing if opening was never synced (no server ID)
+                if (!currentShiftOpeningId) {
+                  if (__DEV__) {
+                    console.log('[TopBar] Close shift sync skipped — no shiftOpeningId yet');
+                  }
+                  return;
+                }
+
+                const appConfig = await getAppConfig();
+                const company = appConfig?.zatca?.company_name || '';
+
+                const details = await getShiftInvoiceDetails(db, currentShiftLocalId);
+                const invoiceSyncStatus = await getShiftInvoiceSyncStatus(db, currentShiftLocalId);
+
+                // Read the shift row to get the actual opening cash
+                const shiftRow = await getShiftByLocalId(db, currentShiftLocalId);
+                const openingCash = shiftRow?.openingCash ?? 0;
+
+                await syncCloseShiftToServer({
+                  pos_opening_entry: currentShiftOpeningId,
+                  company,
+                  period_end_date: formatDateForApi(closingDate),
+                  payment_reconciliation: buildPaymentReconciliation({
+                    openingCash,
+                    expectedCash: details.total_of_cash,
+                    closingCash: cash,
+                    expectedCard: details.total_of_bank,
+                    closingCard: card,
+                  }),
+                  details: buildShiftDetails(details),
+                  name: currentShiftOpeningId,
+                  created_invoice_status: invoiceSyncStatus,
+                });
+
+                await markShiftClosingSynced(db, currentShiftLocalId);
+
+                if (__DEV__) {
+                  console.log('[TopBar] Close shift synced with server:', currentShiftLocalId);
+                }
+              } catch (syncErr) {
+                if (__DEV__) {
+                  console.log('[TopBar] Close shift sync failed, will retry later:', syncErr);
+                }
+              }
+            })();
+          } catch (err) {
+            console.error('[TopBar] Failed to close shift:', err);
+            Alert.alert('Error', 'Failed to close shift. Please try again.');
+          }
+        }}
+      />
     </View>
   );
 }

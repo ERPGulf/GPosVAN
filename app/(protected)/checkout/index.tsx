@@ -1,3 +1,4 @@
+import { selectUser } from '@/src/features/auth/authSlice';
 import {
   clearCart,
   removeFromCart,
@@ -7,10 +8,14 @@ import {
 } from '@/src/features/cart/cartSlice';
 import { AddCustomerModal } from '@/src/features/customers/components/AddCustomerModal';
 import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
+import { buildInvoiceJsonDump, formatDateTimeForApi, syncInvoiceToServer, syncUnclearedInvoiceToServer } from '@/src/features/invoices/services/invoiceApi.service';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
+import { selectShiftLocalId, selectShiftOpeningId } from '@/src/features/shifts/shiftSlice';
+
 import { InvoiceQR } from '@/src/features/zatca/components/InvoiceQR';
 import { useCreateInvoice } from '@/src/features/zatca/hooks/useCreateInvoice';
+import { saveInvoiceFiles } from '@/src/features/zatca/services/invoiceFileStorage';
 import {
   getZatcaConfig,
   hydrateZatcaConfigFromStorage,
@@ -18,15 +23,20 @@ import {
 } from '@/src/features/zatca/services/zatcaConfig';
 import { getZatcaPayloadFromSecureStore } from '@/src/features/zatca/services/zatcaTestPayload';
 import type { InvoiceParams } from '@/src/features/zatca/types';
+import { getNextInvoiceNo, markInvoiceAsSynced, markInvoiceErrorSynced, markInvoiceSyncError, saveInvoiceToDb } from '@/src/infrastructure/db/invoices.repository';
+import { getAppConfig } from '@/src/services/configStore';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { randomUUID } from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
+import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
-import { Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+
 
 type PaymentMethod = 'Cash/Card' | 'Cash' | 'Card';
 
@@ -44,6 +54,7 @@ interface SelectedCustomer {
 const PIH_STORAGE_KEY = '@zatca_pih';
 
 interface GeneratedInvoiceState {
+  invoiceUUID: string;
   xml: string;
   qrData: string;
   invoiceHash: string;
@@ -52,8 +63,14 @@ interface GeneratedInvoiceState {
 export default function CheckoutPage() {
   const router = useRouter();
   const dispatch = useAppDispatch();
+  const sqliteDb = useSQLiteContext();
+  const db = drizzle(sqliteDb);
   const cartItems = useAppSelector(selectCartItems);
   const total = useAppSelector(selectTotal);
+  const user = useAppSelector(selectUser);
+  const shiftLocalId = useAppSelector(selectShiftLocalId);
+  const shiftOpeningId = useAppSelector(selectShiftOpeningId);
+  const selectedPosProfile = useAppSelector((state) => state.auth.selectedPosProfile);
   const { data: customers } = useCustomers();
   const { create: createZatcaInvoice, isLoading: isCreatingInvoice } = useCreateInvoice();
 
@@ -136,7 +153,13 @@ export default function CheckoutPage() {
         return;
       }
 
-      const previousInvoiceHash = (await AsyncStorage.getItem(PIH_STORAGE_KEY)) ?? '';
+      // For the very first invoice there is no stored PIH yet.
+      // Fall back to the initial PIH that was provisioned in the app config.
+      let previousInvoiceHash = await AsyncStorage.getItem(PIH_STORAGE_KEY);
+      if (!previousInvoiceHash) {
+        const appConfig = await getAppConfig();
+        previousInvoiceHash = appConfig?.zatca?.pih ?? '';
+      }
 
       const tax = cartItems.reduce((sum, item) => {
         const rate = item.product.uomPrice ?? item.product.price ?? 0;
@@ -147,8 +170,8 @@ export default function CheckoutPage() {
       const invoiceParams: InvoiceParams = {
         invoiceUUID: randomUUID(),
         customer: {
-          id: selectedCustomer?.id ?? 'WALK_IN',
-          name: selectedCustomer?.name ?? 'Walk-in Customer',
+          id: selectedCustomer?.id ?? null,
+          name: selectedCustomer?.name ?? null,
           phoneNo: selectedCustomer?.phoneNo ?? null,
           taxId: selectedCustomer?.taxId ?? null,
           buyerId: selectedCustomer?.registrationNo ?? null,
@@ -181,8 +204,31 @@ export default function CheckoutPage() {
       await AsyncStorage.setItem('@zatca_last_invoice_xml', invoiceResult.xml);
       await AsyncStorage.setItem('@zatca_last_qr_data', invoiceResult.qrData);
 
-      console.log('Complete Payment', paymentDetails);
-      setGeneratedInvoice(invoiceResult);
+      // Generate a human-readable, sequential invoice number and persist to DB
+      const invoiceNo = await getNextInvoiceNo(db);
+      const invoiceDate = invoiceParams.invoiceDate;
+
+      await saveInvoiceToDb(db, {
+        invoiceUUID: invoiceParams.invoiceUUID,
+        invoiceNo,
+        customerId: selectedCustomer?.id ?? 'WALK_IN',
+        shiftId: shiftLocalId ?? null,
+        userId: user?.id ?? null,
+        posProfile: selectedPosProfile ?? null,
+        previousInvoiceHash: previousInvoiceHash,
+        discount: 0,
+        cartItems,
+        paymentMethod: selectedPaymentMethod,
+        cashAmount: parseFloat(cashAmount) || 0,
+        cardAmount: parseFloat(cardAmount) || 0,
+        dateTime: invoiceDate,
+      });
+
+      // Invoice UUID is stored in state so the QR PNG capture callback can save files
+      const invoiceUUID = invoiceParams.invoiceUUID;
+
+      console.log('Invoice saved to DB:', invoiceNo);
+      setGeneratedInvoice({ invoiceUUID, ...invoiceResult });
       setIsInvoiceModalVisible(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to complete payment';
@@ -310,9 +356,8 @@ export default function CheckoutPage() {
                             city: customer.city,
                           })
                         }
-                        className={`flex-row items-center px-4 py-3 border-b border-gray-50 ${
-                          selectedCustomer?.id === customer.id ? 'bg-green-50' : ''
-                        }`}>
+                        className={`flex-row items-center px-4 py-3 border-b border-gray-50 ${selectedCustomer?.id === customer.id ? 'bg-green-50' : ''
+                          }`}>
                         <View className="w-8 h-8 rounded-full bg-gray-100 items-center justify-center mr-3">
                           <Ionicons name="person-outline" size={16} color="#6b7280" />
                         </View>
@@ -424,7 +469,7 @@ export default function CheckoutPage() {
             cartItems={cartItems}
             onRemoveItem={(index) => dispatch(removeFromCart(index))}
             onUpdateQuantity={(index, delta) => dispatch(updateQuantity({ index, delta }))}
-            onCheckout={() => {}}
+            onCheckout={() => { }}
             showActions={false}
           />
         </View>
@@ -441,12 +486,12 @@ export default function CheckoutPage() {
             <Ionicons name="chevron-forward" size={20} color="white" />
           </TouchableOpacity>
 
-          <TouchableOpacity
+          {/* <TouchableOpacity
             onPress={handleSaveAndClear}
             className="w-full bg-gray-200 py-3 rounded-xl items-center flex-row justify-center">
             <Ionicons name="save-outline" size={20} color="#374151" style={{ marginRight: 8 }} />
             <Text className="text-gray-700 font-semibold">Save and Clear</Text>
-          </TouchableOpacity>
+          </TouchableOpacity> */}
 
           <TouchableOpacity
             onPress={() => router.back()}
@@ -481,7 +526,177 @@ export default function CheckoutPage() {
 
             {generatedInvoice?.qrData ? (
               <View className="items-center mb-4">
-                <InvoiceQR qrData={generatedInvoice.qrData} size={210} />
+                <InvoiceQR
+                  qrData={generatedInvoice.qrData}
+                  size={210}
+                  onCapturePng={async (base64Png) => {
+                    try {
+                      const { xmlPath, qrPngPath } = await saveInvoiceFiles(
+                        generatedInvoice.invoiceUUID,
+                        generatedInvoice.xml,
+                        base64Png,
+                      );
+                      console.log(`Invoice files saved: ${xmlPath}, ${qrPngPath}`);
+
+                      // Fire-and-forget: sync invoice to server
+                      (async () => {
+                        try {
+                          if (!shiftOpeningId) {
+                            console.warn('[Checkout] shiftOpeningId is null — skipping invoice sync');
+                            Alert.alert('Sync Pending', 'Please sync open shift first. Invoice will remain unsynced.');
+                            return;
+                          }
+
+                          const invoiceData = await import('@/src/infrastructure/db/invoices.repository').then(
+                            (mod) => mod.getInvoiceForSync(db, generatedInvoice.invoiceUUID),
+                          );
+                          if (!invoiceData) {
+                            console.error('[Checkout] Invoice not found in DB for sync');
+                            return;
+                          }
+
+                          const appConfig = await getAppConfig();
+                          const phase = appConfig?.phase || '1';
+                          const machineName = process.env.EXPO_PUBLIC_MACHINE_NAME || 'UNKNOWN';
+
+                          // Build items JSON array
+                          const itemsJson = JSON.stringify(
+                            invoiceData.items.map((item) => ({
+                              item_code: item.itemCode || '',
+                              quantity: item.quantity || 0,
+                              rate: item.rate || 0,
+                              uom: item.unitOfMeasure || 'Nos',
+                              tax_rate: item.taxPercentage || 0,
+                            })),
+                          );
+
+                          // Build payments JSON array
+                          const paymentsJson = JSON.stringify(
+                            invoiceData.payments.map((p) => ({
+                              mode_of_payment: p.modeOfPayment || 'Cash',
+                              amount: (p.amount || 0).toFixed(2),
+                            })),
+                          );
+
+                          const serverId = await syncInvoiceToServer({
+                            customerName: selectedCustomer?.name || 'Walk In',
+                            customerPurchaseOrder: invoiceData.invoice.customerPurchaseOrder || 0,
+                            items: itemsJson,
+                            qrPngUri: qrPngPath,
+                            xmlUri: xmlPath,
+                            uniqueId: generatedInvoice.invoiceUUID,
+                            machineName,
+                            payments: paymentsJson,
+                            phase,
+                            posProfile: selectedPosProfile || '',
+                            offlineInvoiceNumber: invoiceData.invoice.invoiceNo || '',
+                            customOfflineCreationTime: formatDateTimeForApi(
+                              invoiceData.invoice.dateTime,
+                            ),
+                            posShift: shiftOpeningId,
+                          });
+
+                          // Update local DB with server invoice ID
+                          await markInvoiceAsSynced(db, generatedInvoice.invoiceUUID, serverId);
+                          console.log('[Checkout] Invoice synced, server ID:', serverId);
+                        } catch (syncErr) {
+                          if (__DEV__) {
+                            console.log('[Checkout] Invoice sync failed, will remain unsynced:', syncErr);
+                          }
+
+                          // Capture the error message before the async IIFE
+                          // (Hermes can't closure-capture catch block params in nested async functions)
+                          let capturedApiResponse = '';
+                          try {
+                            if (syncErr && typeof syncErr === 'object' && 'response' in syncErr) {
+                              capturedApiResponse = JSON.stringify((syncErr as any).response?.data ?? (syncErr as any).message);
+                            } else if (syncErr instanceof Error) {
+                              capturedApiResponse = JSON.stringify({ message: syncErr.message });
+                            } else {
+                              capturedApiResponse = JSON.stringify(syncErr);
+                            }
+                          } catch {
+                            capturedApiResponse = String(syncErr);
+                          }
+
+                          // Persist the error to the local DB
+                          try {
+                            await markInvoiceSyncError(db, generatedInvoice.invoiceUUID, syncErr);
+                          } catch (dbErr) {
+                            console.error('[Checkout] Failed to save sync error to DB:', dbErr);
+                          }
+
+                          // Fire-and-forget: sync the errored invoice to the uncleared endpoint
+                          (async () => {
+                            try {
+                              const invoiceData = await import('@/src/infrastructure/db/invoices.repository').then(
+                                (mod) => mod.getInvoiceForSync(db, generatedInvoice.invoiceUUID),
+                              );
+                              if (!invoiceData) return;
+
+                              const appConfig = await getAppConfig();
+                              const phase = appConfig?.phase || '1';
+                              const machineName = process.env.EXPO_PUBLIC_MACHINE_NAME || 'UNKNOWN';
+
+                              const itemsJson = JSON.stringify(
+                                invoiceData.items.map((item) => ({
+                                  item_code: item.itemCode || '',
+                                  quantity: item.quantity || 0,
+                                  rate: item.rate || 0,
+                                  uom: item.unitOfMeasure || 'Nos',
+                                  tax_rate: item.taxPercentage || 0,
+                                })),
+                              );
+
+                              const paymentsJson = JSON.stringify(
+                                invoiceData.payments.map((p) => ({
+                                  mode_of_payment: p.modeOfPayment || 'Cash',
+                                  amount: (p.amount || 0).toFixed(2),
+                                })),
+                              );
+
+                              const jsonDump = buildInvoiceJsonDump({
+                                machineName,
+                                customOfflineCreationTime: formatDateTimeForApi(invoiceData.invoice.dateTime),
+                                posShift: shiftOpeningId || '',
+                                discountAmount: (invoiceData.invoice.discount || 0).toFixed(2),
+                                phase,
+                                offlineInvoiceNumber: invoiceData.invoice.invoiceNo || '',
+                                posProfile: selectedPosProfile || '',
+                                cashier: user?.id || '',
+                                customerName: selectedCustomer?.name || 'Walk In',
+                                uniqueId: generatedInvoice.invoiceUUID,
+                                customerPurchaseOrder: String(invoiceData.invoice.customerPurchaseOrder || 0),
+                                pih: invoiceData.invoice.previousInvoiceHash || '',
+                                payments: paymentsJson,
+                                items: itemsJson,
+                              });
+
+                              await syncUnclearedInvoiceToServer({
+                                dateTime: formatDateTimeForApi(invoiceData.invoice.dateTime),
+                                invoiceNumber: invoiceData.invoice.invoiceNo || '',
+                                jsonDump,
+                                apiResponse: capturedApiResponse,
+                              });
+
+                              // Mark the error as synced to the server
+                              await markInvoiceErrorSynced(db, generatedInvoice.invoiceUUID);
+                              if (__DEV__) {
+                                console.log('[Checkout] Uncleared invoice synced to server');
+                              }
+                            } catch (unclearedErr) {
+                              if (__DEV__) {
+                                console.log('[Checkout] Failed to sync uncleared invoice:', unclearedErr);
+                              }
+                            }
+                          })();
+                        }
+                      })();
+                    } catch (err) {
+                      console.error('Failed to save invoice files:', err);
+                    }
+                  }}
+                />
               </View>
             ) : (
               <Text className="text-red-500 mb-4">QR data is not available.</Text>
@@ -533,9 +748,8 @@ function PaymentMethodOption({
   return (
     <TouchableOpacity
       onPress={onPress}
-      className={`flex-1 p-4 rounded-xl border ${
-        isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'
-      }`}>
+      className={`flex-1 p-4 rounded-xl border ${isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'
+        }`}>
       <View className="flex-row justify-between items-start mb-3">
         <View className={`w-12 h-12 rounded-full items-center justify-center ${bgIcon}`}>
           <Ionicons name={icon} size={24} color={color} />
