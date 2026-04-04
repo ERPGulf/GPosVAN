@@ -1,11 +1,13 @@
 import { logout, selectUser } from '@/src/features/auth/authSlice';
 import { clearUserTokens } from '@/src/services/api/tokenManager';
+import { clearCart } from '@/src/features/cart/cartSlice';
+import { selectIsShiftOpen } from '@/src/features/shifts/shiftSlice';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Alert, Pressable, Text, View } from 'react-native';
 
 type NavItem = {
   name: string;
@@ -50,6 +52,7 @@ export function Sidebar({ drawerProps, onToggle }: SidebarProps) {
   const router = useRouter();
   const dispatch = useAppDispatch();
   const user = useAppSelector(selectUser);
+  const isShiftOpen = useAppSelector(selectIsShiftOpen);
 
   const handlePress = (routeName: string, routePath: string) => {
     if (drawerProps) {
@@ -62,10 +65,32 @@ export function Sidebar({ drawerProps, onToggle }: SidebarProps) {
     onToggle?.();
   };
 
-  const handleLogout = async () => {
-    await clearUserTokens();
-    dispatch(logout());
-    router.replace('/login');
+  const handleLogout = () => {
+    if (isShiftOpen) {
+      Alert.alert(
+        'Shift is Open',
+        'Please close your shift before logging out.',
+        [{ text: 'OK' }],
+      );
+      return;
+    }
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            await clearUserTokens();
+            dispatch(clearCart());
+            dispatch(logout());
+            router.replace('/login');
+          },
+        },
+      ],
+    );
   };
 
   return (

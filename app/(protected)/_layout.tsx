@@ -39,81 +39,80 @@ export default function ProtectedLayout() {
     }
   }, [posProfiles, selectedPosProfile, dispatch]);
 
+  // Sync products and customers after login (uses user token via apiClient)
+  useEffect(() => {
+    if (!isAuthenticated || hasSynced.current) return;
+    hasSynced.current = true;
+
+    // First push any offline-created customers and pending shifts, then pull latest data
+    Promise.all([
+      pushPendingCustomers(db)
+        .then(() => {
+          if (__DEV__) {
+            console.log('[ProtectedLayout] Pending customers pushed successfully');
+          }
+        })
+        .catch((err) => {
+          console.error('[ProtectedLayout] Failed to push pending customers:', err);
+        }),
+      // Push pending open shifts
+      (async () => {
+        try {
+          const appConfig = await getAppConfig();
+          const company = appConfig?.zatca?.company_name || '';
+          const posProfile = selectedPosProfile || '';
+          const userEmail = user?.email || '';
+
+          const synced = await pushPendingOpenShifts(db, {
+            userEmail,
+            company,
+            posProfile,
+          });
+
+          // If the currently active shift was synced, update Redux
+          if (currentShiftLocalId) {
+            const match = synced.find((s) => s.shiftLocalId === currentShiftLocalId);
+            if (match) {
+              dispatch(setShiftOpeningId(match.shiftOpeningId));
+            }
+          }
+
+          if (__DEV__) {
+            console.log('[ProtectedLayout] Pending open shifts pushed successfully');
+          }
+        } catch (err) {
+          console.error('[ProtectedLayout] Failed to push pending open shifts:', err);
+        }
+      })(),
+    ]).finally(() => {
+      // Pull latest data from API (regardless of push result)
+      Promise.all([
+        syncAllProducts(db)
+          .then(() => {
+            if (__DEV__) {
+              console.log('[ProtectedLayout] Products synced successfully');
+            }
+          })
+          .catch((err) => {
+            console.error('[ProtectedLayout] Failed to sync products:', err);
+          }),
+        syncAllCustomers(db)
+          .then(() => {
+            if (__DEV__) {
+              console.log('[ProtectedLayout] Customers synced successfully');
+            }
+          })
+          .catch((err) => {
+            console.error('[ProtectedLayout] Failed to sync customers:', err);
+          }),
+      ]);
+    });
+  }, [isAuthenticated]);
+
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
     return <Redirect href="/login" />;
   }
-
-  // Sync products and customers after login (uses user token via apiClient)
-  useEffect(() => {
-    if (!hasSynced.current) {
-      hasSynced.current = true;
-
-      // First push any offline-created customers and pending shifts, then pull latest data
-      Promise.all([
-        pushPendingCustomers(db)
-          .then(() => {
-            if (__DEV__) {
-              console.log('[ProtectedLayout] Pending customers pushed successfully');
-            }
-          })
-          .catch((err) => {
-            console.error('[ProtectedLayout] Failed to push pending customers:', err);
-          }),
-        // Push pending open shifts
-        (async () => {
-          try {
-            const appConfig = await getAppConfig();
-            const company = appConfig?.zatca?.company_name || '';
-            const posProfile = selectedPosProfile || '';
-            const userEmail = user?.email || '';
-
-            const synced = await pushPendingOpenShifts(db, {
-              userEmail,
-              company,
-              posProfile,
-            });
-
-            // If the currently active shift was synced, update Redux
-            if (currentShiftLocalId) {
-              const match = synced.find((s) => s.shiftLocalId === currentShiftLocalId);
-              if (match) {
-                dispatch(setShiftOpeningId(match.shiftOpeningId));
-              }
-            }
-
-            if (__DEV__) {
-              console.log('[ProtectedLayout] Pending open shifts pushed successfully');
-            }
-          } catch (err) {
-            console.error('[ProtectedLayout] Failed to push pending open shifts:', err);
-          }
-        })(),
-      ]).finally(() => {
-        // Pull latest data from API (regardless of push result)
-        Promise.all([
-          syncAllProducts(db)
-            .then(() => {
-              if (__DEV__) {
-                console.log('[ProtectedLayout] Products synced successfully');
-              }
-            })
-            .catch((err) => {
-              console.error('[ProtectedLayout] Failed to sync products:', err);
-            }),
-          syncAllCustomers(db)
-            .then(() => {
-              if (__DEV__) {
-                console.log('[ProtectedLayout] Customers synced successfully');
-              }
-            })
-            .catch((err) => {
-              console.error('[ProtectedLayout] Failed to sync customers:', err);
-            }),
-        ]);
-      });
-    }
-  }, []);
 
   return (
     <View className="flex-1 bg-white">

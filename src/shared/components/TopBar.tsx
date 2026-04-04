@@ -1,10 +1,12 @@
 import { logout, selectSelectedPosProfile, selectUser } from '@/src/features/auth/authSlice';
+import { clearCart } from '@/src/features/cart/cartSlice';
 import { CloseShiftModal } from '@/src/features/shifts/components/CloseShiftModal';
 import { OpenShiftModal } from '@/src/features/shifts/components/OpenShiftModal';
 import { buildBalanceDetails, buildPaymentReconciliation, buildShiftDetails, formatDateForApi, syncCloseShiftToServer, syncOpenShiftToServer } from '@/src/features/shifts/services/shiftApi.service';
 import { closeShiftState, openShiftState, selectIsShiftOpen, selectShiftLocalId, selectShiftOpeningId, setShiftOpeningId } from '@/src/features/shifts/shiftSlice';
 import { closeShift, getShiftByLocalId, getShiftInvoiceDetails, getShiftInvoiceSyncStatus, markShiftClosingSynced, markShiftOpeningSynced, openShift } from '@/src/infrastructure/db/shifts.repository';
 import { getAppConfig } from '@/src/services/configStore';
+import { clearUserTokens } from '@/src/services/api/tokenManager';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
@@ -127,7 +129,31 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
                 className="flex-row items-center py-2 mt-1"
                 onPress={() => {
                   setShowUserMenu(false);
-                  dispatch(logout());
+                  if (isShiftOpen) {
+                    Alert.alert(
+                      'Shift is Open',
+                      'Please close your shift before logging out.',
+                      [{ text: 'OK' }],
+                    );
+                    return;
+                  }
+                  Alert.alert(
+                    'Logout',
+                    'Are you sure you want to logout?',
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      {
+                        text: 'Logout',
+                        style: 'destructive',
+                        onPress: async () => {
+                          await clearUserTokens();
+                          dispatch(clearCart());
+                          dispatch(logout());
+                          router.replace('/login');
+                        },
+                      },
+                    ],
+                  );
                 }}
               >
                 <MaterialCommunityIcons name="logout" size={20} color="#ef4444" />
