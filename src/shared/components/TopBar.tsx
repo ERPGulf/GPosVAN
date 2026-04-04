@@ -227,8 +227,20 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
             // Fire-and-forget: attempt immediate close-shift sync with server
             (async () => {
               try {
+                // Resolve shiftOpeningId: prefer Redux, fallback to DB
+                let resolvedOpeningId = currentShiftOpeningId;
+                if (!resolvedOpeningId) {
+                  // Redux might be stale (e.g. synced via Settings but Redux wasn't updated)
+                  // Fall back to the database which is the source of truth
+                  const shiftRow = await getShiftByLocalId(db, currentShiftLocalId);
+                  resolvedOpeningId = shiftRow?.shiftOpeningId ?? null;
+                  if (resolvedOpeningId && __DEV__) {
+                    console.log('[TopBar] Resolved shiftOpeningId from DB:', resolvedOpeningId);
+                  }
+                }
+
                 // Can't sync closing if opening was never synced (no server ID)
-                if (!currentShiftOpeningId) {
+                if (!resolvedOpeningId) {
                   if (__DEV__) {
                     console.log('[TopBar] Close shift sync skipped — no shiftOpeningId yet');
                   }
@@ -246,7 +258,7 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
                 const openingCash = shiftRow?.openingCash ?? 0;
 
                 await syncCloseShiftToServer({
-                  pos_opening_entry: currentShiftOpeningId,
+                  pos_opening_entry: resolvedOpeningId,
                   company,
                   period_end_date: formatDateForApi(closingDate),
                   payment_reconciliation: buildPaymentReconciliation({
@@ -257,7 +269,7 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
                     closingCard: card,
                   }),
                   details: buildShiftDetails(details),
-                  name: currentShiftOpeningId,
+                  name: resolvedOpeningId,
                   created_invoice_status: invoiceSyncStatus,
                 });
 

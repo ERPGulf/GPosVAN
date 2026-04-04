@@ -217,7 +217,7 @@ export async function markInvoiceSyncError(
   await db
     .update(invoices)
     .set({
-      isSynced: true,
+      isSynced: false,
       isError: true,
       errorMessage,
     })
@@ -292,5 +292,257 @@ export async function getErrorInvoiceForSync(
     .where(eq(invoicePayments.invoiceEntityId, invoiceUUID));
 
   return { invoice, items, payments };
+}
+
+// ─── Background sync: push pending invoices ─────────────────────────────────
+
+/**
+ * Get all invoices that haven't been synced yet and are not errored.
+ * These are invoices saved locally but the initial sync never happened
+ * (e.g. device was offline, or shiftOpeningId was missing at checkout time).
+ */
+export async function getUnsyncedInvoices(db: ExpoSQLiteDatabase) {
+  return db
+    .select()
+    .from(invoices)
+    .where(
+      and(
+        eq(invoices.isSynced, false),
+        eq(invoices.isError, false),
+      ),
+    );
+}
+
+/**
+ * Push all pending (unsynced, non-errored) invoices to the server.
+ * For each invoice:
+ * - Fetches invoice data with items & payments
+ * - Calls the create_invoice API via syncInvoiceToServer
+ * - On success: marks isSynced=true, stores server invoice ID
+ * - On failure: marks as errored and attempts uncleared sync
+ *
+ * Returns the count of successfully synced invoices.
+ */
+export async function pushPendingInvoices(
+  db: ExpoSQLiteDatabase,
+  params: {
+    posProfile: string;
+    shiftOpeningId: string;
+    phase: string;
+    machineName: string;
+  },
+): Promise<number> {
+  // Lazy imports to avoid circular dependencies
+  const { syncInvoiceToServer, formatDateTimeForApi } = await import(
+    '../../features/invoices/services/invoiceApi.service'
+  );
+
+  const pending = await getUnsyncedInvoices(db);
+
+  if (pending.length === 0) {
+    if (__DEV__) {
+      console.log('[InvoicesRepository] No pending invoices to push');
+    }
+    return 0;
+  }
+
+  if (__DEV__) {
+    console.log(`[InvoicesRepository] Pushing ${pending.length} pending invoice(s) to API...`);
+  }
+
+  let syncedCount = 0;
+
+  for (const inv of pending) {
+    try {
+      const invoiceData = await getInvoiceForSync(db, inv.id);
+      if (!invoiceData) continue;
+
+      // Build items JSON array
+      const itemsJson = JSON.stringify(
+        invoiceData.items.map((item) => ({
+          item_code: item.itemCode || '',
+          quantity: item.quantity || 0,
+          rate: item.rate || 0,
+          uom: item.unitOfMeasure || 'Nos',
+          tax_rate: item.taxPercentage || 0,
+        })),
+      );
+
+      // Build payments JSON array
+      const paymentsJson = JSON.stringify(
+        invoiceData.payments.map((p) => ({
+          mode_of_payment: p.modeOfPayment || 'Cash',
+          amount: (p.amount || 0).toFixed(2),
+        })),
+      );
+
+      // Try to get saved QR/XML file paths from zatca-invoices directory
+      let qrPngPath = '';
+      let xmlPath = '';
+      try {
+        const FileSystem = await import('expo-file-system/legacy');
+        const baseDir = FileSystem.documentDirectory || '';
+        const qrFile = `${baseDir}zatca-invoices/${inv.id}.png`;
+        const xmlFile = `${baseDir}zatca-invoices/${inv.id}.xml`;
+        const qrInfo = await FileSystem.getInfoAsync(qrFile);
+        const xmlInfo = await FileSystem.getInfoAsync(xmlFile);
+        if (qrInfo.exists) qrPngPath = qrFile;
+        if (xmlInfo.exists) xmlPath = xmlFile;
+      } catch {
+        // Files may not exist, will be handled by the API
+      }
+
+      const serverId = await syncInvoiceToServer({
+        customerName: invoiceData.invoice.customerId || 'Walk In',
+        customerPurchaseOrder: invoiceData.invoice.customerPurchaseOrder || 0,
+        items: itemsJson,
+        qrPngUri: qrPngPath,
+        xmlUri: xmlPath,
+        uniqueId: inv.id,
+        machineName: params.machineName,
+        payments: paymentsJson,
+        phase: params.phase,
+        posProfile: params.posProfile,
+        offlineInvoiceNumber: invoiceData.invoice.invoiceNo || '',
+        customOfflineCreationTime: formatDateTimeForApi(invoiceData.invoice.dateTime),
+        posShift: params.shiftOpeningId,
+      });
+
+      await markInvoiceAsSynced(db, inv.id, serverId);
+      syncedCount++;
+
+      if (__DEV__) {
+        console.log(`[InvoicesRepository] Pushed invoice ${inv.invoiceNo} → server ID: ${serverId}`);
+      }
+    } catch (error: any) {
+      // Detect if this is a network error (device offline) vs an actual API error
+      const isNetworkError =
+        error &&
+        typeof error === 'object' &&
+        error.message === 'Network Error' &&
+        !error.response;
+
+      if (isNetworkError) {
+        // Network error — leave as isSynced=false, isError=false for next retry cycle
+        if (__DEV__) {
+          console.log(`[InvoicesRepository] Network error pushing invoice ${inv.invoiceNo}, will retry later`);
+        }
+      } else {
+        console.error(`[InvoicesRepository] API error pushing invoice ${inv.invoiceNo}:`, error);
+        // Mark as errored so it can be retried via the uncleared endpoint
+        try {
+          await markInvoiceSyncError(db, inv.id, error);
+        } catch (dbErr) {
+          console.error('[InvoicesRepository] Failed to save sync error:', dbErr);
+        }
+      }
+    }
+  }
+
+  return syncedCount;
+}
+
+/**
+ * Push all errored invoices to the server via the uncleared endpoint.
+ * For each errored invoice (isError=true, isErrorSynced=false):
+ * - Builds the json_dump payload
+ * - Calls the create_invoice_unsynced API
+ * - On success: marks isErrorSynced=true
+ * - On failure: logs the error, invoice stays for next retry
+ *
+ * Returns the count of successfully synced errored invoices.
+ */
+export async function pushErroredInvoices(
+  db: ExpoSQLiteDatabase,
+  params: {
+    posProfile: string;
+    shiftOpeningId: string;
+    phase: string;
+    machineName: string;
+    userId: string;
+  },
+): Promise<number> {
+  const {
+    buildInvoiceJsonDump,
+    formatDateTimeForApi,
+    syncUnclearedInvoiceToServer,
+  } = await import('../../features/invoices/services/invoiceApi.service');
+
+  const errored = await getErrorInvoices(db);
+
+  if (errored.length === 0) {
+    if (__DEV__) {
+      console.log('[InvoicesRepository] No errored invoices to push');
+    }
+    return 0;
+  }
+
+  if (__DEV__) {
+    console.log(`[InvoicesRepository] Pushing ${errored.length} errored invoice(s) to uncleared endpoint...`);
+  }
+
+  let syncedCount = 0;
+
+  for (const inv of errored) {
+    try {
+      const invoiceData = await getErrorInvoiceForSync(db, inv.id);
+      if (!invoiceData) continue;
+
+      const itemsJson = JSON.stringify(
+        invoiceData.items.map((item) => ({
+          item_code: item.itemCode || '',
+          quantity: item.quantity || 0,
+          rate: item.rate || 0,
+          uom: item.unitOfMeasure || 'Nos',
+          tax_rate: item.taxPercentage || 0,
+        })),
+      );
+
+      const paymentsJson = JSON.stringify(
+        invoiceData.payments.map((p) => ({
+          mode_of_payment: p.modeOfPayment || 'Cash',
+          amount: (p.amount || 0).toFixed(2),
+        })),
+      );
+
+      const jsonDump = buildInvoiceJsonDump({
+        machineName: params.machineName,
+        customOfflineCreationTime: formatDateTimeForApi(invoiceData.invoice.dateTime),
+        posShift: params.shiftOpeningId,
+        discountAmount: (invoiceData.invoice.discount || 0).toFixed(2),
+        phase: params.phase,
+        offlineInvoiceNumber: invoiceData.invoice.invoiceNo || '',
+        posProfile: params.posProfile,
+        cashier: params.userId,
+        customerName: invoiceData.invoice.customerId || 'Walk In',
+        uniqueId: inv.id,
+        customerPurchaseOrder: String(invoiceData.invoice.customerPurchaseOrder || 0),
+        pih: invoiceData.invoice.previousInvoiceHash || '',
+        payments: paymentsJson,
+        items: itemsJson,
+      });
+
+      await syncUnclearedInvoiceToServer({
+        dateTime: formatDateTimeForApi(invoiceData.invoice.dateTime),
+        invoiceNumber: invoiceData.invoice.invoiceNo || '',
+        jsonDump,
+        apiResponse: invoiceData.invoice.errorMessage || '',
+      });
+
+      await markInvoiceErrorSynced(db, inv.id);
+      syncedCount++;
+
+      if (__DEV__) {
+        console.log(`[InvoicesRepository] Pushed errored invoice ${inv.invoiceNo} to uncleared endpoint`);
+      }
+    } catch (error) {
+      console.error(
+        `[InvoicesRepository] Failed to push errored invoice ${inv.invoiceNo}:`,
+        error,
+      );
+    }
+  }
+
+  return syncedCount;
 }
 
