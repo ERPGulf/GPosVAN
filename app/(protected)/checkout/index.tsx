@@ -8,7 +8,7 @@ import {
 } from '@/src/features/cart/cartSlice';
 import { AddCustomerModal } from '@/src/features/customers/components/AddCustomerModal';
 import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
-import { formatDateTimeForApi, syncInvoiceToServer } from '@/src/features/invoices/services/invoiceApi.service';
+import { buildInvoiceJsonDump, formatDateTimeForApi, syncInvoiceToServer, syncUnclearedInvoiceToServer } from '@/src/features/invoices/services/invoiceApi.service';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
 import { selectShiftLocalId, selectShiftOpeningId } from '@/src/features/shifts/shiftSlice';
@@ -23,7 +23,7 @@ import {
 } from '@/src/features/zatca/services/zatcaConfig';
 import { getZatcaPayloadFromSecureStore } from '@/src/features/zatca/services/zatcaTestPayload';
 import type { InvoiceParams } from '@/src/features/zatca/types';
-import { getNextInvoiceNo, markInvoiceAsSynced, markInvoiceSyncError, saveInvoiceToDb } from '@/src/infrastructure/db/invoices.repository';
+import { getNextInvoiceNo, markInvoiceAsSynced, markInvoiceErrorSynced, markInvoiceSyncError, saveInvoiceToDb } from '@/src/infrastructure/db/invoices.repository';
 import { getAppConfig } from '@/src/services/configStore';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
@@ -603,12 +603,93 @@ export default function CheckoutPage() {
                           if (__DEV__) {
                             console.log('[Checkout] Invoice sync failed, will remain unsynced:', syncErr);
                           }
+
+                          // Capture the error message before the async IIFE
+                          // (Hermes can't closure-capture catch block params in nested async functions)
+                          let capturedApiResponse = '';
+                          try {
+                            if (syncErr && typeof syncErr === 'object' && 'response' in syncErr) {
+                              capturedApiResponse = JSON.stringify((syncErr as any).response?.data ?? (syncErr as any).message);
+                            } else if (syncErr instanceof Error) {
+                              capturedApiResponse = JSON.stringify({ message: syncErr.message });
+                            } else {
+                              capturedApiResponse = JSON.stringify(syncErr);
+                            }
+                          } catch {
+                            capturedApiResponse = String(syncErr);
+                          }
+
                           // Persist the error to the local DB
                           try {
                             await markInvoiceSyncError(db, generatedInvoice.invoiceUUID, syncErr);
                           } catch (dbErr) {
                             console.error('[Checkout] Failed to save sync error to DB:', dbErr);
                           }
+
+                          // Fire-and-forget: sync the errored invoice to the uncleared endpoint
+                          (async () => {
+                            try {
+                              const invoiceData = await import('@/src/infrastructure/db/invoices.repository').then(
+                                (mod) => mod.getInvoiceForSync(db, generatedInvoice.invoiceUUID),
+                              );
+                              if (!invoiceData) return;
+
+                              const appConfig = await getAppConfig();
+                              const phase = appConfig?.phase || '1';
+                              const machineName = process.env.EXPO_PUBLIC_MACHINE_NAME || 'UNKNOWN';
+
+                              const itemsJson = JSON.stringify(
+                                invoiceData.items.map((item) => ({
+                                  item_code: item.itemCode || '',
+                                  quantity: item.quantity || 0,
+                                  rate: item.rate || 0,
+                                  uom: item.unitOfMeasure || 'Nos',
+                                  tax_rate: item.taxPercentage || 0,
+                                })),
+                              );
+
+                              const paymentsJson = JSON.stringify(
+                                invoiceData.payments.map((p) => ({
+                                  mode_of_payment: p.modeOfPayment || 'Cash',
+                                  amount: (p.amount || 0).toFixed(2),
+                                })),
+                              );
+
+                              const jsonDump = buildInvoiceJsonDump({
+                                machineName,
+                                customOfflineCreationTime: formatDateTimeForApi(invoiceData.invoice.dateTime),
+                                posShift: shiftOpeningId || '',
+                                discountAmount: (invoiceData.invoice.discount || 0).toFixed(2),
+                                phase,
+                                offlineInvoiceNumber: invoiceData.invoice.invoiceNo || '',
+                                posProfile: selectedPosProfile || '',
+                                cashier: user?.id || '',
+                                customerName: selectedCustomer?.name || 'Walk In',
+                                uniqueId: generatedInvoice.invoiceUUID,
+                                customerPurchaseOrder: String(invoiceData.invoice.customerPurchaseOrder || 0),
+                                pih: invoiceData.invoice.previousInvoiceHash || '',
+                                payments: paymentsJson,
+                                items: itemsJson,
+                              });
+
+                              await syncUnclearedInvoiceToServer({
+                                dateTime: formatDateTimeForApi(invoiceData.invoice.dateTime),
+                                invoiceNumber: invoiceData.invoice.invoiceNo || '',
+                                jsonDump,
+                                apiResponse: capturedApiResponse,
+                              });
+
+                              // Mark the error as synced to the server
+                              await markInvoiceErrorSynced(db, generatedInvoice.invoiceUUID);
+                              if (__DEV__) {
+                                console.log('[Checkout] Uncleared invoice synced to server');
+                              }
+                            } catch (unclearedErr) {
+                              if (__DEV__) {
+                                console.log('[Checkout] Failed to sync uncleared invoice:', unclearedErr);
+                              }
+                            }
+                          })();
                         }
                       })();
                     } catch (err) {

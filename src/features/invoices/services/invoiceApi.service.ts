@@ -124,3 +124,100 @@ export const formatDateTimeForApi = (date: Date): string => {
   const s = String(date.getSeconds()).padStart(2, '0');
   return `${y}-${mo}-${d} ${h}:${mi}:${s}`;
 };
+
+// ─── Uncleared (Errored) Invoice Sync ────────────────────────────────────────
+
+export interface UnclearedInvoiceSyncParams {
+  dateTime: string;            // 'YYYY-MM-DD HH:mm:ss'
+  invoiceNumber: string;       // local invoice number (invoiceNo)
+  jsonDump: string;            // full serialized invoice JSON
+  apiResponse: string;         // error message from the original failed sync
+}
+
+/**
+ * Build the json_dump string for the uncleared invoice sync API.
+ * This mirrors the InvoiceMapper.toJSON() format from the C# reference.
+ */
+export const buildInvoiceJsonDump = (params: {
+  machineName: string;
+  customOfflineCreationTime: string;
+  posShift: string;
+  discountAmount: string;
+  phase: string;
+  offlineInvoiceNumber: string;
+  posProfile: string;
+  cashier: string;              // userId
+  customerName: string;
+  uniqueId: string;             // invoiceUUID
+  customerPurchaseOrder: string;
+  pih: string;                  // previous invoice hash
+  payments: string;             // JSON array string: [{mode_of_payment, amount}]
+  items: string;                // JSON array string: [{item_code, quantity, rate, uom, tax_rate}]
+}): string => {
+  return JSON.stringify({
+    machine_name: params.machineName,
+    custom_offline_creation_time: params.customOfflineCreationTime,
+    pos_shift: params.posShift,
+    discount_amount: params.discountAmount,
+    phase: params.phase,
+    offline_invoice_number: params.offlineInvoiceNumber,
+    pos_profile: params.posProfile,
+    cashier: params.cashier,
+    customer_name: params.customerName,
+    unique_id: params.uniqueId,
+    Customer_Purchase_Order: params.customerPurchaseOrder,
+    PIH: params.pih,
+    payments: params.payments,
+    items: params.items,
+  });
+};
+
+/**
+ * Sync an errored (uncleared) invoice to the server via form-urlencoded.
+ * This is used when the original create_invoice call failed and the
+ * invoice needs to be submitted as an uncleared record.
+ */
+export const syncUnclearedInvoiceToServer = async (
+  params: UnclearedInvoiceSyncParams,
+): Promise<void> => {
+  const formData = new URLSearchParams();
+  formData.append('date_time', params.dateTime);
+  formData.append('invoice_number', params.invoiceNumber);
+  formData.append('clearing_status', '0');
+  formData.append('json_dump', params.jsonDump);
+  formData.append('manually_submitted', '0');
+  formData.append('api_response', params.apiResponse);
+  formData.append('type', 'Sales Invoice');
+
+  if (__DEV__) {
+    console.log('[InvoiceApi] Syncing uncleared invoice to server:', {
+      invoiceNumber: params.invoiceNumber,
+      dateTime: params.dateTime,
+    });
+  }
+
+  try {
+    await apiClient.post(
+      '/gpos.gpos.pos.create_invoice_unsynced',
+      formData.toString(),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      },
+    );
+
+    if (__DEV__) {
+      console.log('[InvoiceApi] Uncleared invoice synced successfully:', params.invoiceNumber);
+    }
+  } catch (error: any) {
+    if (__DEV__) {
+      console.error(
+        '[InvoiceApi] Failed to sync uncleared invoice:',
+        error?.response?.data || error.message,
+      );
+    }
+    throw error;
+  }
+};
+
