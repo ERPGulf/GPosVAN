@@ -14,7 +14,43 @@ interface TaxCalc {
   taxAmount: number;
 }
 
+type TaxCategoryId = 'S' | 'Z';
+
+interface InvoiceLineAmounts {
+  itemName: string;
+  lineExtensionAmount: number;
+  priceAmount: number;
+  quantity: number;
+  roundingAmount: number;
+  taxAmount: number;
+  taxCategoryId: TaxCategoryId;
+  taxPercent: number;
+  unitCode: string;
+}
+
+interface InvoiceTaxSubtotal {
+  discountAmount: number;
+  taxAmount: number;
+  taxCategoryId: TaxCategoryId;
+  taxPercent: number;
+  taxableAmount: number;
+}
+
+export interface InvoiceTaxBreakdown {
+  allowanceAmount: number;
+  lines: InvoiceLineAmounts[];
+  payableAmount: number;
+  subtotals: InvoiceTaxSubtotal[];
+  taxExclusiveAmount: number;
+  taxInclusiveAmount: number;
+  totalExclusiveAmount: number;
+  totalTaxAmount: number;
+}
+
 function calculateTax(amountIncludingTax: number, taxPercent: number): TaxCalc {
+  if (taxPercent <= 0) {
+    return { productPrice: amountIncludingTax, taxAmount: 0 };
+  }
   const taxAmount = amountIncludingTax - amountIncludingTax / (1 + taxPercent / 100);
   const productPrice = amountIncludingTax - taxAmount;
   return { productPrice, taxAmount };
@@ -26,6 +62,124 @@ function fmt(n: number): string {
 
 function round2(n: number): number {
   return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+function normalizeTaxPercent(value: number | null | undefined): number {
+  if (value == null || !Number.isFinite(value)) return 15;
+  return Math.max(0, round2(value));
+}
+
+function getTaxCategoryId(taxPercent: number): TaxCategoryId {
+  return taxPercent > 0 ? 'S' : 'Z';
+}
+
+function buildInvoiceLineAmounts(item: CartItem, isTaxIncluded: boolean): InvoiceLineAmounts {
+  const taxPercent = normalizeTaxPercent(item.product.taxPercentage);
+  const itemPrice = item.product.uomPrice ?? item.product.price ?? 0;
+  const quantity = item.quantity;
+  const unitCode = item.product.uom || 'PCE';
+  const itemName = item.product.name || 'Item';
+
+  let taxAmount: number;
+  let lineExtensionAmount: number;
+  let priceAmount: number;
+  let roundingAmount: number;
+
+  if (isTaxIncluded) {
+    const grossLine = round2(quantity * itemPrice);
+    const taxCalc = calculateTax(grossLine, taxPercent);
+    taxAmount = round2(taxCalc.taxAmount);
+    lineExtensionAmount = round2(grossLine - taxAmount);
+    priceAmount = round2(calculateTax(itemPrice, taxPercent).productPrice);
+    roundingAmount = grossLine;
+  } else {
+    lineExtensionAmount = round2(quantity * itemPrice);
+    taxAmount = round2((lineExtensionAmount * taxPercent) / 100);
+    priceAmount = round2(itemPrice);
+    roundingAmount = round2(lineExtensionAmount + taxAmount);
+  }
+
+  return {
+    itemName,
+    lineExtensionAmount,
+    priceAmount,
+    quantity,
+    roundingAmount,
+    taxAmount,
+    taxCategoryId: getTaxCategoryId(taxPercent),
+    taxPercent,
+    unitCode,
+  };
+}
+
+export function calculateInvoiceTaxBreakdown(
+  cartItems: CartItem[],
+  isTaxIncluded: boolean,
+  discount: number,
+): InvoiceTaxBreakdown {
+  const lines = cartItems.map((item) => buildInvoiceLineAmounts(item, isTaxIncluded));
+  const totalExclusiveAmount = round2(
+    lines.reduce((sum, line) => sum + line.lineExtensionAmount, 0),
+  );
+  const requestedAllowance = Math.max(0, round2(discount));
+  const allowanceAmount = Math.min(requestedAllowance, totalExclusiveAmount);
+
+  const grouped = new Map<string, InvoiceTaxSubtotal>();
+  for (const line of lines) {
+    const key = `${line.taxCategoryId}:${line.taxPercent.toFixed(2)}`;
+    const current = grouped.get(key);
+
+    if (current) {
+      current.taxableAmount = round2(current.taxableAmount + line.lineExtensionAmount);
+      current.taxAmount = round2(current.taxAmount + line.taxAmount);
+      continue;
+    }
+
+    grouped.set(key, {
+      discountAmount: 0,
+      taxAmount: line.taxAmount,
+      taxCategoryId: line.taxCategoryId,
+      taxPercent: line.taxPercent,
+      taxableAmount: line.lineExtensionAmount,
+    });
+  }
+
+  const subtotals = Array.from(grouped.values()).sort(
+    (left, right) => right.taxPercent - left.taxPercent,
+  );
+
+  if (allowanceAmount > 0 && totalExclusiveAmount > 0 && subtotals.length > 0) {
+    let allocatedAllowance = 0;
+
+    for (let index = 0; index < subtotals.length; index++) {
+      const subtotal = subtotals[index];
+      const isLast = index === subtotals.length - 1;
+      const proportionalAllowance = isLast
+        ? round2(allowanceAmount - allocatedAllowance)
+        : round2((allowanceAmount * subtotal.taxableAmount) / totalExclusiveAmount);
+      const appliedAllowance = Math.min(proportionalAllowance, subtotal.taxableAmount);
+
+      subtotal.discountAmount = appliedAllowance;
+      subtotal.taxableAmount = round2(subtotal.taxableAmount - appliedAllowance);
+      subtotal.taxAmount = round2((subtotal.taxableAmount * subtotal.taxPercent) / 100);
+      allocatedAllowance = round2(allocatedAllowance + appliedAllowance);
+    }
+  }
+
+  const totalTaxAmount = round2(subtotals.reduce((sum, subtotal) => sum + subtotal.taxAmount, 0));
+  const taxExclusiveAmount = round2(totalExclusiveAmount - allowanceAmount);
+  const taxInclusiveAmount = round2(taxExclusiveAmount + totalTaxAmount);
+
+  return {
+    allowanceAmount,
+    lines,
+    payableAmount: taxInclusiveAmount,
+    subtotals,
+    taxExclusiveAmount,
+    taxInclusiveAmount,
+    totalExclusiveAmount,
+    totalTaxAmount,
+  };
 }
 
 function sanitizeText(value: string | null | undefined, fallback: string, maxLength = 127): string {
@@ -221,7 +375,7 @@ function buildAccountingCustomerParty(
     `\n        </cac:TaxScheme>` +
     `\n      </cac:PartyTaxScheme>` +
     `\n      <cac:PartyLegalEntity>` +
-    `\n        <cbc:RegistrationName>${escapeXml(customer.id)}</cbc:RegistrationName>` +
+    `\n        <cbc:RegistrationName>${escapeXml(customer.name ?? customer.id ?? 'Customer')}</cbc:RegistrationName>` +
     `\n      </cac:PartyLegalEntity>` +
     `\n    </cac:Party>` +
     `\n  </cac:AccountingCustomerParty>`
@@ -239,114 +393,100 @@ function buildDeliveryAndPayment(invoiceDate: Date): string {
   );
 }
 
-function buildAllowanceCharge(totalTax: number, discount: number): string {
-  const taxCategoryId = discount > 0 ? 'Z' : 'S';
-  return (
-    `\n  <cac:AllowanceCharge>` +
-    `\n    <cbc:ChargeIndicator>false</cbc:ChargeIndicator>` +
-    `\n    <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>` +
-    `\n    <cbc:AllowanceChargeReason>Loyalty Discount</cbc:AllowanceChargeReason>` +
-    `\n    <cbc:Amount currencyID="SAR">${fmt(discount)}</cbc:Amount>` +
-    `\n    <cac:TaxCategory>` +
-    `\n      <cbc:ID>${taxCategoryId}</cbc:ID>` +
-    `\n      <cbc:Percent>15.00</cbc:Percent>` +
-    `\n      <cac:TaxScheme>` +
-    `\n        <cbc:ID>VAT</cbc:ID>` +
-    `\n      </cac:TaxScheme>` +
-    `\n    </cac:TaxCategory>` +
-    `\n  </cac:AllowanceCharge>` +
-    `\n  <cac:TaxTotal>` +
-    `\n    <cbc:TaxAmount currencyID="SAR">${fmt(totalTax)}</cbc:TaxAmount>` +
-    `\n  </cac:TaxTotal>`
-  );
+function buildAllowanceCharges(subtotals: InvoiceTaxSubtotal[]): string {
+  return subtotals
+    .filter((subtotal) => subtotal.discountAmount > 0)
+    .map(
+      (subtotal) =>
+        `\n  <cac:AllowanceCharge>` +
+        `\n    <cbc:ChargeIndicator>false</cbc:ChargeIndicator>` +
+        `\n    <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>` +
+        `\n    <cbc:AllowanceChargeReason>Loyalty Discount</cbc:AllowanceChargeReason>` +
+        `\n    <cbc:Amount currencyID="SAR">${fmt(subtotal.discountAmount)}</cbc:Amount>` +
+        `\n    <cac:TaxCategory>` +
+        `\n      <cbc:ID>${subtotal.taxCategoryId}</cbc:ID>` +
+        `\n      <cbc:Percent>${fmt(subtotal.taxPercent)}</cbc:Percent>` +
+        `\n      <cac:TaxScheme>` +
+        `\n        <cbc:ID>VAT</cbc:ID>` +
+        `\n      </cac:TaxScheme>` +
+        `\n    </cac:TaxCategory>` +
+        `\n  </cac:AllowanceCharge>`,
+    )
+    .join('');
 }
 
-function buildTaxTotalWithSubtotal(totalTax: number, taxableAmount: number): string {
+function buildTaxTotals(totalTax: number, subtotals: InvoiceTaxSubtotal[]): string {
+  const taxSubtotalsXml = subtotals
+    .map(
+      (subtotal) =>
+        `\n    <cac:TaxSubtotal>` +
+        `\n      <cbc:TaxableAmount currencyID="SAR">${fmt(subtotal.taxableAmount)}</cbc:TaxableAmount>` +
+        `\n      <cbc:TaxAmount currencyID="SAR">${fmt(subtotal.taxAmount)}</cbc:TaxAmount>` +
+        `\n      <cac:TaxCategory>` +
+        `\n        <cbc:ID>${subtotal.taxCategoryId}</cbc:ID>` +
+        `\n        <cbc:Percent>${fmt(subtotal.taxPercent)}</cbc:Percent>` +
+        `\n        <cac:TaxScheme>` +
+        `\n          <cbc:ID>VAT</cbc:ID>` +
+        `\n        </cac:TaxScheme>` +
+        `\n      </cac:TaxCategory>` +
+        `\n    </cac:TaxSubtotal>`,
+    )
+    .join('');
+
   return (
     `\n  <cac:TaxTotal>` +
     `\n    <cbc:TaxAmount currencyID="SAR">${fmt(totalTax)}</cbc:TaxAmount>` +
-    `\n    <cac:TaxSubtotal>` +
-    `\n      <cbc:TaxableAmount currencyID="SAR">${fmt(taxableAmount)}</cbc:TaxableAmount>` +
-    `\n      <cbc:TaxAmount currencyID="SAR">${fmt(totalTax)}</cbc:TaxAmount>` +
-    `\n      <cac:TaxCategory>` +
-    `\n        <cbc:ID>S</cbc:ID>` +
-    `\n        <cbc:Percent>15.00</cbc:Percent>` +
-    `\n        <cac:TaxScheme>` +
-    `\n          <cbc:ID>VAT</cbc:ID>` +
-    `\n        </cac:TaxScheme>` +
-    `\n      </cac:TaxCategory>` +
-    `\n    </cac:TaxSubtotal>` +
+    `\n  </cac:TaxTotal>` +
+    `\n  <cac:TaxTotal>` +
+    `\n    <cbc:TaxAmount currencyID="SAR">${fmt(totalTax)}</cbc:TaxAmount>` +
+    taxSubtotalsXml +
     `\n  </cac:TaxTotal>`
   );
 }
 
 function buildLegalMonetaryTotal(
-  totalTax: number,
-  totalExcludeTax: number,
+  totalExclusiveAmount: number,
+  taxExclusiveAmount: number,
+  taxInclusiveAmount: number,
   discount: number,
 ): string {
-  const taxInclusive = totalExcludeTax + totalTax;
-  const payable = taxInclusive - discount;
   return (
     `\n  <cac:LegalMonetaryTotal>` +
-    `\n    <cbc:LineExtensionAmount currencyID="SAR">${fmt(totalExcludeTax)}</cbc:LineExtensionAmount>` +
-    `\n    <cbc:TaxExclusiveAmount currencyID="SAR">${fmt(totalExcludeTax)}</cbc:TaxExclusiveAmount>` +
-    `\n    <cbc:TaxInclusiveAmount currencyID="SAR">${fmt(taxInclusive)}</cbc:TaxInclusiveAmount>` +
+    `\n    <cbc:LineExtensionAmount currencyID="SAR">${fmt(totalExclusiveAmount)}</cbc:LineExtensionAmount>` +
+    `\n    <cbc:TaxExclusiveAmount currencyID="SAR">${fmt(taxExclusiveAmount)}</cbc:TaxExclusiveAmount>` +
+    `\n    <cbc:TaxInclusiveAmount currencyID="SAR">${fmt(taxInclusiveAmount)}</cbc:TaxInclusiveAmount>` +
     `\n    <cbc:AllowanceTotalAmount currencyID="SAR">${fmt(discount)}</cbc:AllowanceTotalAmount>` +
-    `\n    <cbc:PayableAmount currencyID="SAR">${fmt(payable)}</cbc:PayableAmount>` +
+    `\n    <cbc:PayableAmount currencyID="SAR">${fmt(taxInclusiveAmount)}</cbc:PayableAmount>` +
     `\n  </cac:LegalMonetaryTotal>`
   );
 }
 
-function buildInvoiceLines(cartItems: CartItem[], isTaxIncluded: boolean): string {
-  const vatRate = 15;
+function buildInvoiceLines(linesData: InvoiceLineAmounts[]): string {
   let lines = '';
-  for (let i = 0; i < cartItems.length; i++) {
-    const item = cartItems[i];
-    const itemPrice = item.product.uomPrice ?? item.product.price ?? 0;
-    const quantity = item.quantity;
-    const unitCode = item.product.uom || 'PCE';
-
-    let tax: number;
-    let lineExtension: number;
-    let pricePerUnit: number;
-    let roundingAmount: number;
-
-    if (isTaxIncluded) {
-      const grossLine = round2(quantity * itemPrice);
-      const taxCalc = calculateTax(grossLine, vatRate);
-      tax = round2(taxCalc.taxAmount);
-      lineExtension = round2(grossLine - tax);
-      pricePerUnit = round2(calculateTax(itemPrice, vatRate).productPrice);
-      roundingAmount = grossLine;
-    } else {
-      lineExtension = round2(quantity * itemPrice);
-      tax = round2((lineExtension * vatRate) / 100);
-      pricePerUnit = round2(itemPrice);
-      roundingAmount = round2(lineExtension + tax);
-    }
+  for (let i = 0; i < linesData.length; i++) {
+    const line = linesData[i];
 
     lines +=
       `\n  <cac:InvoiceLine>` +
       `\n    <cbc:ID>${i + 1}</cbc:ID>` +
-      `\n    <cbc:InvoicedQuantity unitCode="${escapeXml(unitCode)}">${fmt(quantity)}</cbc:InvoicedQuantity>` +
-      `\n    <cbc:LineExtensionAmount currencyID="SAR">${fmt(lineExtension)}</cbc:LineExtensionAmount>` +
+      `\n    <cbc:InvoicedQuantity unitCode="${escapeXml(line.unitCode)}">${fmt(line.quantity)}</cbc:InvoicedQuantity>` +
+      `\n    <cbc:LineExtensionAmount currencyID="SAR">${fmt(line.lineExtensionAmount)}</cbc:LineExtensionAmount>` +
       `\n    <cac:TaxTotal>` +
-      `\n      <cbc:TaxAmount currencyID="SAR">${fmt(tax)}</cbc:TaxAmount>` +
-      `\n      <cbc:RoundingAmount currencyID="SAR">${fmt(roundingAmount)}</cbc:RoundingAmount>` +
+      `\n      <cbc:TaxAmount currencyID="SAR">${fmt(line.taxAmount)}</cbc:TaxAmount>` +
+      `\n      <cbc:RoundingAmount currencyID="SAR">${fmt(line.roundingAmount)}</cbc:RoundingAmount>` +
       `\n    </cac:TaxTotal>` +
       `\n    <cac:Item>` +
-      `\n      <cbc:Name>${escapeXml(item.product.name || 'Item')}</cbc:Name>` +
+      `\n      <cbc:Name>${escapeXml(line.itemName)}</cbc:Name>` +
       `\n      <cac:ClassifiedTaxCategory>` +
-      `\n        <cbc:ID>S</cbc:ID>` +
-      `\n        <cbc:Percent>15.00</cbc:Percent>` +
+      `\n        <cbc:ID>${line.taxCategoryId}</cbc:ID>` +
+      `\n        <cbc:Percent>${fmt(line.taxPercent)}</cbc:Percent>` +
       `\n        <cac:TaxScheme>` +
       `\n          <cbc:ID>VAT</cbc:ID>` +
       `\n        </cac:TaxScheme>` +
       `\n      </cac:ClassifiedTaxCategory>` +
       `\n    </cac:Item>` +
       `\n    <cac:Price>` +
-      `\n      <cbc:PriceAmount currencyID="SAR">${fmt(pricePerUnit)}</cbc:PriceAmount>` +
+      `\n      <cbc:PriceAmount currencyID="SAR">${fmt(line.priceAmount)}</cbc:PriceAmount>` +
       `\n    </cac:Price>` +
       `\n  </cac:InvoiceLine>`;
   }
@@ -471,11 +611,10 @@ export function buildBaseInvoiceXml(params: BuildInvoiceXmlParams): string {
     previousInvoiceHash,
     customer,
     cartItems,
-    tax,
-    totalExcludeTax,
     discount,
     config,
   } = params;
+  const breakdown = calculateInvoiceTaxBreakdown(cartItems, config.isTaxIncludedInPrice, discount);
 
   const xmlns = 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2';
   const xmlns_cac = 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2';
@@ -490,10 +629,15 @@ export function buildBaseInvoiceXml(params: BuildInvoiceXmlParams): string {
   xml += buildAccountingSupplierParty(config);
   xml += buildAccountingCustomerParty(customer, invoiceSubType);
   xml += buildDeliveryAndPayment(invoiceDate);
-  xml += buildAllowanceCharge(tax, discount);
-  xml += buildTaxTotalWithSubtotal(tax, totalExcludeTax);
-  xml += buildLegalMonetaryTotal(tax, totalExcludeTax, discount);
-  xml += buildInvoiceLines(cartItems, config.isTaxIncludedInPrice);
+  xml += buildAllowanceCharges(breakdown.subtotals);
+  xml += buildTaxTotals(breakdown.totalTaxAmount, breakdown.subtotals);
+  xml += buildLegalMonetaryTotal(
+    breakdown.totalExclusiveAmount,
+    breakdown.taxExclusiveAmount,
+    breakdown.taxInclusiveAmount,
+    breakdown.allowanceAmount,
+  );
+  xml += buildInvoiceLines(breakdown.lines);
   xml += `\n</Invoice>\n`;
 
   return xml;
