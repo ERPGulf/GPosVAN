@@ -217,6 +217,7 @@ export async function markInvoiceSyncError(
   await db
     .update(invoices)
     .set({
+      isSynced: true,
       isError: true,
       errorMessage,
     })
