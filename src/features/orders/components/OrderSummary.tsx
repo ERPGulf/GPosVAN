@@ -25,6 +25,10 @@ export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onChec
   const total = subtotal - discount;
 
   const handleCheckoutPress = () => {
+    if (cartItems.length === 0) {
+      Alert.alert('Empty Cart', 'Please add at least 1 product before checking out.');
+      return;
+    }
     if (!isShiftOpen) {
       Alert.alert('Please open a shift before checking out.');
       return;

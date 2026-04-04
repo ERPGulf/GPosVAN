@@ -121,6 +121,16 @@ export default function CheckoutPage() {
   };
 
   const handleCompletePayment = async () => {
+    if (cartItems.length === 0) {
+      alert('Please add at least 1 product before completing payment.');
+      return;
+    }
+
+    if (!selectedCustomer) {
+      alert('Please select a customer before completing payment.');
+      return;
+    }
+
     const paymentDetails: any = {
       paymentMethod: selectedPaymentMethod,
       customer: selectedCustomer,
@@ -478,8 +488,8 @@ export default function CheckoutPage() {
         <View className="p-4 bg-gray-50 border-t border-gray-200 gap-3">
           <TouchableOpacity
             onPress={handleCompletePayment}
-            disabled={isCreatingInvoice}
-            className="w-full bg-green-500 py-4 rounded-xl items-center flex-row justify-center">
+            disabled={isCreatingInvoice || cartItems.length === 0 || !selectedCustomer}
+            className={`w-full py-4 rounded-xl items-center flex-row justify-center ${isCreatingInvoice || cartItems.length === 0 || !selectedCustomer ? 'bg-gray-300' : 'bg-green-500'}`}>
             <Text className="text-white font-bold text-lg mr-2">
               {isCreatingInvoice ? 'Generating Invoice...' : 'Complete Payment'}
             </Text>
