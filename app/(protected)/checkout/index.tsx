@@ -8,7 +8,12 @@ import {
 } from '@/src/features/cart/cartSlice';
 import { AddCustomerModal } from '@/src/features/customers/components/AddCustomerModal';
 import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
-import { buildInvoiceJsonDump, formatDateTimeForApi, syncInvoiceToServer, syncUnclearedInvoiceToServer } from '@/src/features/invoices/services/invoiceApi.service';
+import {
+  buildInvoiceJsonDump,
+  formatDateTimeForApi,
+  syncInvoiceToServer,
+  syncUnclearedInvoiceToServer,
+} from '@/src/features/invoices/services/invoiceApi.service';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
 import { selectShiftLocalId, selectShiftOpeningId } from '@/src/features/shifts/shiftSlice';
@@ -23,7 +28,13 @@ import {
 } from '@/src/features/zatca/services/zatcaConfig';
 import { getZatcaPayloadFromSecureStore } from '@/src/features/zatca/services/zatcaTestPayload';
 import type { InvoiceParams } from '@/src/features/zatca/types';
-import { getNextInvoiceNo, markInvoiceAsSynced, markInvoiceErrorSynced, markInvoiceSyncError, saveInvoiceToDb } from '@/src/infrastructure/db/invoices.repository';
+import {
+  getNextInvoiceNo,
+  markInvoiceAsSynced,
+  markInvoiceErrorSynced,
+  markInvoiceSyncError,
+  saveInvoiceToDb,
+} from '@/src/infrastructure/db/invoices.repository';
 import { getAppConfig } from '@/src/services/configStore';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,7 +47,6 @@ import * as Sharing from 'expo-sharing';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
 import { Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-
 
 type PaymentMethod = 'Cash/Card' | 'Cash' | 'Card';
 
@@ -366,8 +376,9 @@ export default function CheckoutPage() {
                             city: customer.city,
                           })
                         }
-                        className={`flex-row items-center px-4 py-3 border-b border-gray-50 ${selectedCustomer?.id === customer.id ? 'bg-green-50' : ''
-                          }`}>
+                        className={`flex-row items-center px-4 py-3 border-b border-gray-50 ${
+                          selectedCustomer?.id === customer.id ? 'bg-green-50' : ''
+                        }`}>
                         <View className="w-8 h-8 rounded-full bg-gray-100 items-center justify-center mr-3">
                           <Ionicons name="person-outline" size={16} color="#6b7280" />
                         </View>
@@ -479,7 +490,7 @@ export default function CheckoutPage() {
             cartItems={cartItems}
             onRemoveItem={(index) => dispatch(removeFromCart(index))}
             onUpdateQuantity={(index, delta) => dispatch(updateQuantity({ index, delta }))}
-            onCheckout={() => { }}
+            onCheckout={() => {}}
             showActions={false}
           />
         </View>
@@ -552,14 +563,17 @@ export default function CheckoutPage() {
                       (async () => {
                         try {
                           if (!shiftOpeningId) {
-                            console.warn('[Checkout] shiftOpeningId is null — skipping invoice sync');
+                            console.warn(
+                              '[Checkout] shiftOpeningId is null — skipping invoice sync',
+                            );
                             // Alert.alert('Sync Pending', 'Please sync open shift first. Invoice will remain unsynced.');
                             return;
                           }
 
-                          const invoiceData = await import('@/src/infrastructure/db/invoices.repository').then(
-                            (mod) => mod.getInvoiceForSync(db, generatedInvoice.invoiceUUID),
-                          );
+                          const invoiceData =
+                            await import('@/src/infrastructure/db/invoices.repository').then(
+                              (mod) => mod.getInvoiceForSync(db, generatedInvoice.invoiceUUID),
+                            );
                           if (!invoiceData) {
                             console.error('[Checkout] Invoice not found in DB for sync');
                             return;
@@ -625,12 +639,17 @@ export default function CheckoutPage() {
                             // background sync (pushPendingInvoices) will retry it
                             // when connectivity is restored.
                             if (__DEV__) {
-                              console.log('[Checkout] Invoice sync failed due to network error, will retry via background sync');
+                              console.log(
+                                '[Checkout] Invoice sync failed due to network error, will retry via background sync',
+                              );
                             }
                           } else {
                             // Actual API error — server returned an error response
                             if (__DEV__) {
-                              console.log('[Checkout] Invoice sync failed with API error, marking as errored:', syncErr);
+                              console.log(
+                                '[Checkout] Invoice sync failed with API error, marking as errored:',
+                                syncErr,
+                              );
                             }
 
                             // Capture the error message before the async IIFE
@@ -638,7 +657,9 @@ export default function CheckoutPage() {
                             let capturedApiResponse = '';
                             try {
                               if (syncErr && typeof syncErr === 'object' && 'response' in syncErr) {
-                                capturedApiResponse = JSON.stringify((syncErr as any).response?.data ?? (syncErr as any).message);
+                                capturedApiResponse = JSON.stringify(
+                                  (syncErr as any).response?.data ?? (syncErr as any).message,
+                                );
                               } else if (syncErr instanceof Error) {
                                 capturedApiResponse = JSON.stringify({ message: syncErr.message });
                               } else {
@@ -658,14 +679,17 @@ export default function CheckoutPage() {
                             // Fire-and-forget: sync the errored invoice to the uncleared endpoint
                             (async () => {
                               try {
-                                const invoiceData = await import('@/src/infrastructure/db/invoices.repository').then(
-                                  (mod) => mod.getInvoiceForSync(db, generatedInvoice.invoiceUUID),
-                                );
+                                const invoiceData =
+                                  await import('@/src/infrastructure/db/invoices.repository').then(
+                                    (mod) =>
+                                      mod.getInvoiceForSync(db, generatedInvoice.invoiceUUID),
+                                  );
                                 if (!invoiceData) return;
 
                                 const appConfig = await getAppConfig();
                                 const phase = appConfig?.phase || '1';
-                                const machineName = process.env.EXPO_PUBLIC_MACHINE_NAME || 'UNKNOWN';
+                                const machineName =
+                                  process.env.EXPO_PUBLIC_MACHINE_NAME || 'UNKNOWN';
 
                                 const itemsJson = JSON.stringify(
                                   invoiceData.items.map((item) => ({
@@ -686,7 +710,9 @@ export default function CheckoutPage() {
 
                                 const jsonDump = buildInvoiceJsonDump({
                                   machineName,
-                                  customOfflineCreationTime: formatDateTimeForApi(invoiceData.invoice.dateTime),
+                                  customOfflineCreationTime: formatDateTimeForApi(
+                                    invoiceData.invoice.dateTime,
+                                  ),
                                   posShift: shiftOpeningId || '',
                                   discountAmount: (invoiceData.invoice.discount || 0).toFixed(2),
                                   phase,
@@ -695,7 +721,9 @@ export default function CheckoutPage() {
                                   cashier: user?.id || '',
                                   customerName: selectedCustomer?.name || 'Walk In',
                                   uniqueId: generatedInvoice.invoiceUUID,
-                                  customerPurchaseOrder: String(invoiceData.invoice.customerPurchaseOrder || 0),
+                                  customerPurchaseOrder: String(
+                                    invoiceData.invoice.customerPurchaseOrder || 0,
+                                  ),
                                   pih: invoiceData.invoice.previousInvoiceHash || '',
                                   payments: paymentsJson,
                                   items: itemsJson,
@@ -715,7 +743,10 @@ export default function CheckoutPage() {
                                 }
                               } catch (unclearedErr) {
                                 if (__DEV__) {
-                                  console.log('[Checkout] Failed to sync uncleared invoice:', unclearedErr);
+                                  console.log(
+                                    '[Checkout] Failed to sync uncleared invoice:',
+                                    unclearedErr,
+                                  );
                                 }
                               }
                             })();
@@ -778,8 +809,9 @@ function PaymentMethodOption({
   return (
     <TouchableOpacity
       onPress={onPress}
-      className={`flex-1 p-4 rounded-xl border ${isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'
-        }`}>
+      className={`flex-1 p-4 rounded-xl border ${
+        isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'
+      }`}>
       <View className="flex-row justify-between items-start mb-3">
         <View className={`w-12 h-12 rounded-full items-center justify-center ${bgIcon}`}>
           <Ionicons name={icon} size={24} color={color} />
