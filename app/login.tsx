@@ -155,10 +155,34 @@ export default function LoginScreen() {
         }
       } else {
         // API returned an error (invalid credentials, etc.)
-        const errorMessage =
-          apiError?.response?.data?.message ||
-          apiError?.response?.data?.exc ||
-          'Invalid email or password';
+        let errorMessage = 'Invalid email or password';
+        const responseData = apiError?.response?.data;
+
+        if (responseData) {
+          if (typeof responseData === 'string') {
+            errorMessage = responseData;
+          } else if (typeof responseData.message === 'string') {
+            errorMessage = responseData.message;
+          } else if (
+            responseData.message &&
+            typeof responseData.message === 'object' &&
+            typeof responseData.message.message === 'string'
+          ) {
+            errorMessage = responseData.message.message;
+          } else if (typeof responseData.exc_type === 'string') {
+            errorMessage = responseData.exc_type.replace(/([A-Z])/g, ' $1').trim();
+          } else if (typeof responseData.exc === 'string') {
+            errorMessage = 'Server exception occurred during login.';
+          }
+        } else if (typeof apiError?.message === 'string') {
+          errorMessage = apiError.message;
+        }
+
+        // Final safeguard: ensure errorMessage is always a string
+        if (typeof errorMessage !== 'string') {
+          errorMessage = 'Invalid email or password. Please try again.';
+        }
+
         setLoginError(errorMessage);
       }
     } finally {
