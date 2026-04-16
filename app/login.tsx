@@ -1,9 +1,12 @@
+import { setAppConfig, selectAppConfig } from '@/src/features/app/appConfigSlice';
+import { fetchPosSettings } from '@/src/features/app/services/posSettings.service';
 import { login } from '@/src/features/auth/authSlice';
 import * as schema from '@/src/infrastructure/db/schema';
 import { authenticateUser } from '@/src/infrastructure/db/users.repository';
 import { generateAppToken, generateUserToken } from '@/src/services/api/httpClient';
 import { clearUserTokens } from '@/src/services/api/tokenManager';
-import { useAppDispatch } from '@/src/store/hooks';
+import { getBranchId, getMachineName } from '@/src/services/credentialStore';
+import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { useRouter } from 'expo-router';
@@ -35,6 +38,7 @@ export default function LoginScreen() {
   const drizzleDb = drizzle(db, { schema });
   const router = useRouter();
   const dispatch = useAppDispatch();
+  const existingAppConfig = useAppSelector(selectAppConfig);
 
   const [isLoading, setIsLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -78,6 +82,38 @@ export default function LoginScreen() {
         );
       }
 
+      // ─── Fetch POS Settings (after tokens generated, before sync) ───
+      try {
+        const [machineName, branchId] = await Promise.all([
+          getMachineName(),
+          getBranchId(),
+        ]);
+
+        const posSettings = await fetchPosSettings(
+          machineName || '',
+          branchId || '',
+        );
+
+        dispatch(setAppConfig(posSettings));
+        if (__DEV__) {
+          console.log('[Login] POS settings fetched and saved to Redux');
+        }
+      } catch (posErr) {
+        // pos_settings API failed — check for cached config
+        if (existingAppConfig) {
+          if (__DEV__) {
+            console.log('[Login] pos_settings fetch failed, using cached config');
+          }
+        } else {
+          // No cached config — block login
+          setLoginError(
+            'Failed to fetch POS settings and no cached configuration found. Please ensure you have an internet connection for the first login.',
+          );
+          setIsLoading(false);
+          return;
+        }
+      }
+
       router.replace('/(protected)');
     } catch (apiError: any) {
       // Check if this is a network error (offline) — fall back to local login
@@ -90,6 +126,15 @@ export default function LoginScreen() {
       if (isNetworkError) {
         if (__DEV__) {
           console.log('[Login] API unavailable, falling back to offline login');
+        }
+
+        // For offline login, we need cached AppConfig to exist
+        if (!existingAppConfig) {
+          setLoginError(
+            'Cannot login offline without a prior successful login. Please connect to the internet.',
+          );
+          setIsLoading(false);
+          return;
         }
 
         try {

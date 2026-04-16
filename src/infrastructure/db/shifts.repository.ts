@@ -10,11 +10,12 @@ import {
 } from '../../features/shifts/services/shiftApi.service';
 import type { ShiftInvoiceDetails } from '../../features/shifts/services/shiftApi.service';
 import { invoicePayments, invoices, shifts } from './schema';
+import { getMachineName } from '@/src/services/credentialStore';
 
 /**
  * Generate a shift local ID in the format: username-yyyyMMdd-MachineId
  */
-export const generateShiftLocalId = (username: string): string => {
+export const generateShiftLocalId = async (username: string): Promise<string> => {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -24,7 +25,7 @@ export const generateShiftLocalId = (username: string): string => {
   const seconds = String(now.getSeconds()).padStart(2, '0');
   const dateTimeStr = `${year}${month}${day}${hours}${minutes}${seconds}`;
 
-  const machineId = process.env.EXPO_PUBLIC_MACHINE_NAME || 'UNKNOWN';
+  const machineId = await getMachineName() || 'UNKNOWN';
 
   return `${username}-${dateTimeStr}-${machineId}`;
 };
@@ -41,7 +42,7 @@ export const openShift = async (
     branch?: string;
   },
 ): Promise<string> => {
-  const shiftLocalId = generateShiftLocalId(params.username);
+  const shiftLocalId = await generateShiftLocalId(params.username);
 
   await db.insert(shifts).values({
     shiftLocalId,

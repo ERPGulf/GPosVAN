@@ -2,7 +2,8 @@ import { ExpoSQLiteDatabase } from 'drizzle-orm/expo-sqlite';
 import { and, eq, sql } from 'drizzle-orm';
 import { invoiceIdSequence, invoiceItems, invoicePayments, invoices } from './schema';
 import type { CartItem } from '@/src/features/cart/types';
-import { getAppConfig } from '@/src/services/configStore';
+import { getMachineName } from '@/src/services/credentialStore';
+import { store } from '@/src/store/store';
 
 // ─── Invoice number generator ────────────────────────────────────────────────
 
@@ -18,7 +19,7 @@ function formatDate(date: Date): string {
  * formatted invoice number: INV-YYYYMMDD-XXXXXX (e.g. INV-20260401-000042)
  */
 export async function getNextInvoiceNo(db: ExpoSQLiteDatabase): Promise<string> {
-  const appConfig = await getAppConfig();
+  const appConfig = store.getState().appConfig.config;
   const prefix = appConfig?.prefix || 'INV';
 
   // Upsert: insert seed row if not present, otherwise increment and return

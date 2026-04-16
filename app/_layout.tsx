@@ -1,6 +1,6 @@
 import SetupScreen from '@/app/setup';
 import migrations from '@/src/infrastructure/db/migrations/migrations';
-import { isConfigured } from '@/src/services/configStore';
+import { isConfigured } from '@/src/services/credentialStore';
 import { persistor, store } from '@/src/store/store';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { drizzle } from 'drizzle-orm/expo-sqlite';

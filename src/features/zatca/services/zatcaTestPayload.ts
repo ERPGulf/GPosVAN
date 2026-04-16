@@ -1,16 +1,16 @@
-import { getAppConfig } from '@/src/services/configStore';
+import { store } from '@/src/store/store';
 import type { BackendConfigPayload } from './zatcaConfig';
 
 /**
- * Build a BackendConfigPayload from the AppConfig stored in
- * expo-secure-store (uploaded during first-launch setup).
+ * Build a BackendConfigPayload from the AppConfig stored in Redux
+ * (persisted via redux-persist + AsyncStorage).
  *
- * Returns `null` when no config has been stored yet.
+ * Returns `null` when no config has been loaded yet.
  */
-export async function getZatcaPayloadFromSecureStore(): Promise<BackendConfigPayload | null> {
-  const appConfig = await getAppConfig();
+export function getZatcaPayloadFromSecureStore(): BackendConfigPayload | null {
+  const appConfig = store.getState().appConfig.config;
   if (!appConfig) {
-    console.warn('[ZATCA] No AppConfig found in SecureStore. Cannot build payload.');
+    console.warn('[ZATCA] No AppConfig found in Redux. Cannot build payload.');
     return null;
   }
 

@@ -1,6 +1,8 @@
-import type { AppConfig } from '@/src/features/app/types';
+import { selectAppConfig, setAppConfig } from '@/src/features/app/appConfigSlice';
+import { fetchPosSettings } from '@/src/features/app/services/posSettings.service';
 import { useSyncUsers } from '@/src/features/auth';
 import { selectUser } from '@/src/features/auth/authSlice';
+import { selectShiftLocalId, setShiftOpeningId } from '@/src/features/shifts/shiftSlice';
 import {
     pushPendingCustomers,
     syncAllCustomers,
@@ -14,29 +16,18 @@ import {
     pushPendingCloseShifts,
     pushPendingOpenShifts,
 } from '@/src/infrastructure/db/shifts.repository';
-import {
-    clearAppConfig,
-    getAppConfig,
-    saveAppConfig,
-} from '@/src/services/configStore';
-import { selectShiftLocalId, setShiftOpeningId } from '@/src/features/shifts/shiftSlice';
+import { clearCredentials, getBranchId, getMachineName } from '@/src/services/credentialStore';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import { drizzle } from 'drizzle-orm/expo-sqlite';
-import * as DocumentPicker from 'expo-document-picker';
-import { File } from 'expo-file-system';
 import * as Network from 'expo-network';
 import { openDatabaseSync } from 'expo-sqlite';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
     ScrollView,
     Text,
-    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
@@ -44,81 +35,9 @@ import {
 const expoDb = openDatabaseSync('van_pos.db', { enableChangeListener: true });
 const db = drizzle(expoDb);
 
-/**
- * Minimal validation for AppConfig shape.
- */
-function validateAppConfig(data: unknown): data is AppConfig {
-    if (typeof data !== 'object' || data === null) return false;
-    const obj = data as Record<string, unknown>;
-
-    const requiredKeys: (keyof AppConfig)[] = [
-        'discount_field',
-        'prefix',
-        'item_code_total_digits',
-        'item_code_starting_position',
-        'weight_starting_position',
-        'weight_total_digitsexcluding_decimal',
-        'no_of_decimal_in_weights',
-        'price_included_in_barcode_or_not',
-        'price_starting_position',
-        'price_total_digitsexcluding_decimals',
-        'no_of_decimal_in_price',
-        'inclusive',
-        'tax_percentage',
-        'phase',
-        'zatca',
-        'cardpay_settings',
-        'branch_details',
-    ];
-
-    for (const key of requiredKeys) {
-        if (!(key in obj)) return false;
-    }
-
-    if (typeof obj.zatca !== 'object' || obj.zatca === null) return false;
-    if (typeof obj.cardpay_settings !== 'object' || obj.cardpay_settings === null) return false;
-    if (typeof obj.branch_details !== 'object' || obj.branch_details === null) return false;
-
-    return true;
-}
-
-async function processConfigJson(content: string): Promise<string | null> {
-    let parsed: unknown;
-    try {
-        parsed = JSON.parse(content);
-        console.log('[Settings] JSON parsed successfully');
-    } catch {
-        return 'Invalid JSON. Please check the format.';
-    }
-
-    if (!validateAppConfig(parsed)) {
-        return 'Invalid configuration. The JSON is missing required fields.';
-    }
-
-    console.log('[Settings] Validation passed, saving config...');
-    await saveAppConfig(parsed);
-    console.log('[Settings] Config saved successfully');
-    return null;
-}
-
 // ─── Sync status types ────────────────────────────────────────────────
 type SyncKey = 'products' | 'customers' | 'users' | 'shiftsAndInvoices';
 type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
-
-// ─── User Profile Detail Row ──────────────────────────────────────────
-function ProfileRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
-    return (
-        <View className="flex-row items-center py-3 border-b border-gray-50">
-            <View className="w-9 h-9 bg-gray-50 rounded-lg items-center justify-center mr-3">
-                <Ionicons name={icon} size={18} color="#6b7280" />
-            </View>
-            <View className="flex-1">
-                <Text className="text-xs text-gray-400 uppercase tracking-wider">{label}</Text>
-                <Text className="text-base text-gray-800 mt-0.5">{value}</Text>
-            </View>
-        </View>
-    );
-}
 
 // ─── Sync Button ──────────────────────────────────────────────────────
 function SyncButton({
@@ -186,21 +105,14 @@ export default function SettingsPage() {
     const user = useAppSelector(selectUser);
     const dispatch = useAppDispatch();
     const currentShiftLocalId = useAppSelector(selectShiftLocalId);
+    const appConfig = useAppSelector(selectAppConfig);
 
-    // ── App config state ─────────────────────────────────────────────
-    const [currentConfig, setCurrentConfig] = useState<AppConfig | null>(null);
-    const [isLoadingConfig, setIsLoadingConfig] = useState(true);
+    // ── Status messages ──────────────────────────────────────────────
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-    // Edit modal state
-    const [editModalVisible, setEditModalVisible] = useState(false);
-    const [editJson, setEditJson] = useState('');
-    const [editError, setEditError] = useState<string | null>(null);
-    const [editLoading, setEditLoading] = useState(false);
-
-    // Upload state
-    const [uploading, setUploading] = useState(false);
+    // ── POS Settings refresh state ───────────────────────────────────
+    const [isRefreshingSettings, setIsRefreshingSettings] = useState(false);
 
     // ── Sync state ───────────────────────────────────────────────────
     const [syncStatus, setSyncStatus] = useState<Record<SyncKey, SyncStatus>>({
@@ -210,24 +122,6 @@ export default function SettingsPage() {
         shiftsAndInvoices: 'idle',
     });
     const { sync: syncUsersFromApi } = useSyncUsers();
-
-    // Load current config
-    useEffect(() => {
-        loadConfig();
-    }, []);
-
-    const loadConfig = async () => {
-        setIsLoadingConfig(true);
-        try {
-            const config = await getAppConfig();
-            setCurrentConfig(config);
-            console.log('[Settings] Current config loaded');
-        } catch (err) {
-            console.error('[Settings] Failed to load config:', err);
-        } finally {
-            setIsLoadingConfig(false);
-        }
-    };
 
     const showSuccess = (message: string) => {
         setSuccessMessage(message);
@@ -306,12 +200,11 @@ export default function SettingsPage() {
         if (!(await checkInternet())) return;
         updateSyncStatus('shiftsAndInvoices', 'syncing');
         try {
-            const appConfig = await getAppConfig();
             const company = appConfig?.zatca?.company_name || '';
             const posProfile = user?.posProfile?.[0] || '';
             const userEmail = user?.email || '';
             const phase = appConfig?.phase || '1';
-            const machineName = process.env.EXPO_PUBLIC_MACHINE_NAME || 'UNKNOWN';
+            const machineName = await getMachineName() || 'UNKNOWN';
             const userId = user?.id || '';
 
             // Step 1: Sync open shifts → get shiftOpeningId from server
@@ -333,7 +226,6 @@ export default function SettingsPage() {
             }
 
             // Determine shiftOpeningId for invoice sync
-            // Use the most recently synced shift, or fall back to the first synced one
             const shiftOpeningId = syncedShifts.length > 0
                 ? syncedShifts[syncedShifts.length - 1].shiftOpeningId
                 : '';
@@ -375,7 +267,7 @@ export default function SettingsPage() {
             console.error('[Settings] Shifts & invoices sync failed:', err);
             updateSyncStatus('shiftsAndInvoices', 'error');
         }
-    }, [user]);
+    }, [user, appConfig, currentShiftLocalId, dispatch]);
 
     const isSyncingAny =
         syncStatus.products === 'syncing' ||
@@ -387,91 +279,35 @@ export default function SettingsPage() {
         await Promise.all([handleSyncProducts(), handleSyncCustomers(), handleSyncUsers(), handleSyncShiftsAndInvoices()]);
     }, [handleSyncProducts, handleSyncCustomers, handleSyncUsers, handleSyncShiftsAndInvoices]);
 
-    // ── Config handlers (preserved from original) ────────────────────
-    const handleReupload = async () => {
+    // ── Refresh POS Settings handler ─────────────────────────────────
+    const handleRefreshPosSettings = useCallback(async () => {
+        if (!(await checkInternet())) return;
+        setIsRefreshingSettings(true);
         try {
-            setUploading(true);
-            setErrorMessage(null);
+            const [machineName, branchId] = await Promise.all([
+                getMachineName(),
+                getBranchId(),
+            ]);
 
-            console.log('[Settings] Opening document picker for re-upload...');
-            const result = await DocumentPicker.getDocumentAsync({
-                type: '*/*',
-                copyToCacheDirectory: true,
-            });
+            const posSettings = await fetchPosSettings(
+                machineName || '',
+                branchId || '',
+            );
 
-            if (result.canceled) {
-                setUploading(false);
-                return;
+            dispatch(setAppConfig(posSettings));
+            showSuccess('POS settings refreshed successfully!');
+            if (__DEV__) {
+                console.log('[Settings] POS settings refreshed');
             }
-
-            const file = result.assets[0];
-            console.log(`[Settings] File selected: ${file.name}`);
-
-            if (!file.name.toLowerCase().endsWith('.json')) {
-                showError('Please select a .json file.');
-                setUploading(false);
-                return;
-            }
-
-            const fileObj = new File(file.uri);
-            const content = fileObj.textSync();
-            console.log(`[Settings] File read (${content.length} chars)`);
-
-            const error = await processConfigJson(content);
-            if (error) {
-                showError(error);
-                setUploading(false);
-                return;
-            }
-
-            await loadConfig();
-            showSuccess('Configuration updated successfully!');
         } catch (err) {
-            console.error('[Settings] Re-upload error:', err);
-            showError(err instanceof Error ? err.message : 'An unexpected error occurred.');
+            console.error('[Settings] Failed to refresh POS settings:', err);
+            showError('Failed to refresh POS settings. Please try again.');
         } finally {
-            setUploading(false);
+            setIsRefreshingSettings(false);
         }
-    };
+    }, [dispatch]);
 
-    const openEditModal = () => {
-        if (currentConfig) {
-            setEditJson(JSON.stringify(currentConfig, null, 2));
-        } else {
-            setEditJson('');
-        }
-        setEditError(null);
-        setEditModalVisible(true);
-    };
-
-    const handleEditSave = async () => {
-        if (!editJson.trim()) {
-            setEditError('JSON cannot be empty.');
-            return;
-        }
-
-        setEditLoading(true);
-        setEditError(null);
-
-        try {
-            const error = await processConfigJson(editJson.trim());
-            if (error) {
-                setEditError(error);
-                setEditLoading(false);
-                return;
-            }
-
-            setEditLoading(false);
-            setEditModalVisible(false);
-            await loadConfig();
-            showSuccess('Configuration updated successfully!');
-        } catch (err) {
-            console.error('[Settings] Edit save error:', err);
-            setEditError(err instanceof Error ? err.message : 'An unexpected error occurred.');
-            setEditLoading(false);
-        }
-    };
-
+    // ── Reset handler ────────────────────────────────────────────────
     const handleReset = () => {
         Alert.alert(
             'Reset Configuration',
@@ -483,8 +319,7 @@ export default function SettingsPage() {
                     style: 'destructive',
                     onPress: async () => {
                         try {
-                            await clearAppConfig();
-                            setCurrentConfig(null);
+                            await clearCredentials();
                             showSuccess('Configuration has been reset.');
                             console.log('[Settings] Config cleared');
                         } catch (err) {
@@ -496,16 +331,6 @@ export default function SettingsPage() {
             ]
         );
     };
-
-    // ── Loading state ────────────────────────────────────────────────
-    if (isLoadingConfig) {
-        return (
-            <View className="flex-1 items-center justify-center">
-                <ActivityIndicator size="large" color="#22c55e" />
-                <Text className="mt-4 text-gray-500">Loading settings...</Text>
-            </View>
-        );
-    }
 
     // ── Render ───────────────────────────────────────────────────────
     return (
@@ -535,77 +360,7 @@ export default function SettingsPage() {
                     </View>
                 )}
 
-                {/* ═══ 1. USER PROFILE SECTION ═══ */}
-                {/* 
-                <View className="p-5 border-b border-gray-100">
-                    <View className="flex-row items-center">
-                        <View className="w-10 h-10 bg-blue-100 rounded-xl items-center justify-center mr-3">
-                            <Ionicons name="person-outline" size={22} color="#3b82f6" />
-                        </View>
-                        <View className="flex-1">
-                            <Text className="text-lg font-semibold text-gray-800">
-                                User Profile
-                            </Text>
-                            <Text className="text-gray-400 text-sm">
-                                {user ? (user.cashierName || user.username || 'Logged in') : 'No user logged in'}
-                            </Text>
-                        </View>
-                    </View>
-                </View>
-
-                <View className="px-5 pb-4">
-                    {user ? (
-                        <>
-                            {(user.cashierName || user.username) && (
-                                <ProfileRow
-                                    icon="person-circle-outline"
-                                    label="Name"
-                                    value={user.cashierName || user.username || '—'}
-                                />
-                            )}
-                            {user.email && (
-                                <ProfileRow
-                                    icon="mail-outline"
-                                    label="Email"
-                                    value={user.email}
-                                />
-                            )}
-                            {user.shopName && (
-                                <ProfileRow
-                                    icon="storefront-outline"
-                                    label="Shop Name"
-                                    value={user.shopName}
-                                />
-                            )}
-                            {user.address && (
-                                <ProfileRow
-                                    icon="location-outline"
-                                    label="Address"
-                                    value={user.address}
-                                />
-                            )}
-                            <ProfileRow
-                                icon="shield-checkmark-outline"
-                                label="Role"
-                                value={user.isAdmin ? 'Administrator' : 'Cashier'}
-                            />
-                            {user.posProfile && user.posProfile.length > 0 && (
-                                <ProfileRow
-                                    icon="briefcase-outline"
-                                    label="POS Profile"
-                                    value={user.posProfile.join(', ')}
-                                />
-                            )}
-                        </>
-                    ) : (
-                        <View className="py-6 items-center">
-                            <Ionicons name="person-outline" size={40} color="#d1d5db" />
-                            <Text className="text-gray-400 mt-2 text-sm">No user data available</Text>
-                        </View>
-                    )}
-                </View>
-                */}
-                {/* ═══ 3. BACKGROUND SYNCING SECTION ═══ */}
+                {/* ═══ BACKGROUND SYNCING SECTION ═══ */}
                 <View className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-6">
                     {/* Section Header */}
                     <View className="p-5 border-b border-gray-100">
@@ -672,59 +427,69 @@ export default function SettingsPage() {
                     </View>
                 </View>
 
-                {/* ═══ 2. APP CONFIGURATION SECTION ═══ */}
+                {/* ═══ POS SETTINGS SECTION ═══ */}
                 <View className="bg-white rounded-2xl shadow-sm border border-gray-100 mb-6">
                     {/* Section Header */}
                     <View className="p-5 border-b border-gray-100">
                         <View className="flex-row items-center">
                             <View className="w-10 h-10 bg-green-100 rounded-xl items-center justify-center mr-3">
-                                <Ionicons name="document-text-outline" size={22} color="#22c55e" />
+                                <Ionicons name="settings-outline" size={22} color="#22c55e" />
                             </View>
                             <View className="flex-1">
                                 <Text className="text-lg font-semibold text-gray-800">
-                                    App Configuration
+                                    POS Settings
                                 </Text>
                                 <Text className="text-gray-400 text-sm">
-                                    {currentConfig ? 'Configuration loaded' : 'No configuration found'}
+                                    {appConfig ? 'Settings loaded from server' : 'No settings loaded'}
                                 </Text>
                             </View>
                         </View>
                     </View>
 
+                    {/* Config Info */}
+                    {appConfig && (
+                        <View className="px-5 pt-4 pb-2">
+                            <View className="bg-gray-50 rounded-xl p-3 gap-1">
+                                {appConfig.zatca?.company_name && (
+                                    <Text className="text-gray-600 text-sm">
+                                        <Text className="font-medium">Company: </Text>
+                                        {appConfig.zatca.company_name}
+                                    </Text>
+                                )}
+                                {appConfig.phase && (
+                                    <Text className="text-gray-600 text-sm">
+                                        <Text className="font-medium">Phase: </Text>
+                                        {appConfig.phase}
+                                    </Text>
+                                )}
+                                {appConfig.prefix && (
+                                    <Text className="text-gray-600 text-sm">
+                                        <Text className="font-medium">Invoice Prefix: </Text>
+                                        {appConfig.prefix}
+                                    </Text>
+                                )}
+                            </View>
+                        </View>
+                    )}
+
                     {/* Actions */}
-                    <View className="p-5 gap-3">
-                        {/* Re-upload Config */}
+                    <View className="p-5">
+                        {/* Refresh POS Settings */}
                         <TouchableOpacity
-                            onPress={handleReupload}
-                            disabled={uploading}
-                            className="flex-row items-center bg-green-500 rounded-xl px-5 py-4 shadow-sm">
-                            {uploading ? (
+                            onPress={handleRefreshPosSettings}
+                            disabled={isRefreshingSettings}
+                            className={`flex-row items-center justify-center rounded-xl px-5 py-4 ${isRefreshingSettings
+                                ? 'bg-green-400'
+                                : 'bg-green-500'
+                                }`}
+                        >
+                            {isRefreshingSettings ? (
                                 <ActivityIndicator color="white" />
                             ) : (
-                                <Ionicons name="cloud-upload-outline" size={22} color="white" />
+                                <Ionicons name="refresh-outline" size={22} color="white" />
                             )}
                             <Text className="text-white font-semibold text-base ml-3">
-                                {uploading ? 'Uploading...' : 'Upload New Config File'}
-                            </Text>
-                        </TouchableOpacity>
-
-                        {/* Edit Current Config */}
-                        <TouchableOpacity
-                            onPress={openEditModal}
-                            disabled={!currentConfig}
-                            className={`flex-row items-center rounded-xl px-5 py-4 border-2 ${currentConfig
-                                ? 'border-green-500 bg-white'
-                                : 'border-gray-200 bg-gray-50'
-                                }`}>
-                            <Ionicons
-                                name="create-outline"
-                                size={22}
-                                color={currentConfig ? '#22c55e' : '#9ca3af'}
-                            />
-                            <Text
-                                className={`font-semibold text-base ml-3 ${currentConfig ? 'text-green-600' : 'text-gray-400'
-                                    }`}>
-                                Edit Current Config
+                                {isRefreshingSettings ? 'Refreshing...' : 'Refresh POS Settings'}
                             </Text>
                         </TouchableOpacity>
                     </View>
@@ -756,87 +521,13 @@ export default function SettingsPage() {
                                     Reset Configuration
                                 </Text>
                                 <Text className="text-red-400 text-xs mt-0.5">
-                                    Deletes config and requires re-upload on next launch
+                                    Deletes credentials and requires re-upload on next launch
                                 </Text>
                             </View>
                         </TouchableOpacity>
                     </View>
                 </View>
             </View>
-
-            {/* Edit JSON Modal */}
-            <Modal
-                visible={editModalVisible}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setEditModalVisible(false)}>
-                <KeyboardAvoidingView
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    className="flex-1">
-                    <View className="flex-1 justify-center items-center bg-black/50 px-6">
-                        <View className="w-full max-w-2xl bg-white rounded-2xl shadow-2xl p-6">
-                            {/* Modal Header */}
-                            <View className="flex-row justify-between items-center mb-4">
-                                <Text className="text-xl font-bold text-gray-800">
-                                    Edit Configuration
-                                </Text>
-                                <TouchableOpacity
-                                    onPress={() => setEditModalVisible(false)}
-                                    className="w-8 h-8 rounded-full bg-gray-100 items-center justify-center">
-                                    <Text className="text-gray-500 font-bold text-lg">✕</Text>
-                                </TouchableOpacity>
-                            </View>
-
-                            {/* Edit Error */}
-                            {editError && (
-                                <View className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4">
-                                    <Text className="text-red-600 text-center font-medium text-sm">
-                                        {editError}
-                                    </Text>
-                                </View>
-                            )}
-
-                            {/* JSON Editor */}
-                            <ScrollView className="max-h-96">
-                                <TextInput
-                                    className="w-full bg-gray-50 border border-gray-200 rounded-xl p-4 text-gray-800 text-sm font-mono"
-                                    placeholder="Edit JSON configuration..."
-                                    placeholderTextColor="#9ca3af"
-                                    value={editJson}
-                                    onChangeText={setEditJson}
-                                    multiline
-                                    numberOfLines={20}
-                                    textAlignVertical="top"
-                                    style={{ minHeight: 300, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' }}
-                                    autoCapitalize="none"
-                                    autoCorrect={false}
-                                />
-                            </ScrollView>
-
-                            {/* Modal Actions */}
-                            <View className="flex-row mt-4 gap-3">
-                                <TouchableOpacity
-                                    onPress={() => setEditModalVisible(false)}
-                                    className="flex-1 py-3 rounded-xl items-center justify-center border border-gray-200 bg-gray-50">
-                                    <Text className="text-gray-600 font-semibold">Cancel</Text>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity
-                                    onPress={handleEditSave}
-                                    disabled={editLoading}
-                                    className={`flex-1 py-3 rounded-xl items-center justify-center ${editLoading ? 'bg-green-400' : 'bg-green-500'
-                                        }`}>
-                                    {editLoading ? (
-                                        <ActivityIndicator color="white" />
-                                    ) : (
-                                        <Text className="text-white font-semibold">Save Changes</Text>
-                                    )}
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    </View>
-                </KeyboardAvoidingView>
-            </Modal>
-        </ScrollView >
+        </ScrollView>
     );
 }
