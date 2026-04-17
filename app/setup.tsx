@@ -7,6 +7,7 @@ import { File } from 'expo-file-system';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -14,7 +15,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 
 /**
@@ -29,7 +30,7 @@ async function processSetupJson(content: string): Promise<string | null> {
     const sanitizedContent = content
       .replace(/[\u00A0\u200B-\u200D\uFEFF]/g, ' ')
       .replace(/[“”]/g, '"');
-    
+
     parsed = JSON.parse(sanitizedContent);
     console.log('[SetupScreen] JSON parsed successfully');
   } catch (error: any) {
@@ -154,11 +155,15 @@ export default function SetupScreen({ onConfigured }: SetupScreenProps) {
       <View className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
         {/* Header */}
         <View className="items-center mb-8">
-          <View className="w-16 h-16 bg-green-500 rounded-2xl items-center justify-center mb-4 shadow-lg">
-            <Text className="text-3xl text-white font-bold">G</Text>
+          <View className="w-72 h-20 ">
+            <Image
+              source={require('@/assets/images/logo.png')}
+              className="w-full h-full"
+              resizeMode="cover"
+            />
           </View>
-          <Text className="text-2xl font-bold text-gray-800">GPos Van</Text>
-          <Text className="text-gray-500 mt-1">Initial Setup</Text>
+          <Text className="text-2xl font-bold text-gray-800 mt-1">Initial Setup</Text>
+
         </View>
 
         {/* Description */}

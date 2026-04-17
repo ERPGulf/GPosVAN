@@ -13,7 +13,7 @@ import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { useRouter } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import React, { useState } from 'react';
-import { Alert, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, Text, TouchableOpacity, View } from 'react-native';
 
 interface TopBarProps {
   onMenuPress?: () => void;
@@ -51,11 +51,14 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
           </TouchableOpacity>
         )}
 
-        <View className="flex-row items-center gap-2">
-          <View className="bg-green-500 rounded-lg p-1.5">
-            <MaterialCommunityIcons name="clover" size={20} color="white" />
+        <View className="flex-row items-center">
+          <View className="w-44 h-16  ">
+            <Image
+              source={require('@/assets/images/logo.png')}
+              className="w-full h-full"
+              resizeMode="cover"
+            />
           </View>
-          <Text className="text-xl font-bold text-gray-800">GPosVan</Text>
         </View>
       </View>
 
