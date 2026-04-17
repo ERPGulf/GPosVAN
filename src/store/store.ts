@@ -1,3 +1,4 @@
+import appConfigReducer from '@/src/features/app/appConfigSlice';
 import authReducer from '@/src/features/auth/authSlice';
 import cartReducer from '@/src/features/cart/cartSlice';
 import shiftReducer from '@/src/features/shifts/shiftSlice';
@@ -18,10 +19,17 @@ const shiftPersistConfig = {
   whitelist: ['shiftLocalId', 'shiftOpeningId', 'isShiftOpen'], // persist shift state across app restarts
 };
 
+const appConfigPersistConfig = {
+  key: 'appConfig',
+  storage: AsyncStorage,
+  whitelist: ['config', 'isLoaded'], // persist pos_settings for offline availability
+};
+
 // Root Reducer
 const rootReducer = combineReducers({
   auth: persistReducer(authPersistConfig, authReducer),
   shift: persistReducer(shiftPersistConfig, shiftReducer),
+  appConfig: persistReducer(appConfigPersistConfig, appConfigReducer),
   cart: cartReducer, // cart stays in-memory only (clears on app restart)
 });
 

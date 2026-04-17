@@ -1,3 +1,4 @@
+import { selectAppConfig } from '@/src/features/app/appConfigSlice';
 import { logout, selectSelectedPosProfile, selectUser } from '@/src/features/auth/authSlice';
 import { clearCart } from '@/src/features/cart/cartSlice';
 import { CloseShiftModal } from '@/src/features/shifts/components/CloseShiftModal';
@@ -5,7 +6,6 @@ import { OpenShiftModal } from '@/src/features/shifts/components/OpenShiftModal'
 import { buildBalanceDetails, buildPaymentReconciliation, buildShiftDetails, formatDateForApi, syncCloseShiftToServer, syncOpenShiftToServer } from '@/src/features/shifts/services/shiftApi.service';
 import { closeShiftState, openShiftState, selectIsShiftOpen, selectShiftLocalId, selectShiftOpeningId, setShiftOpeningId } from '@/src/features/shifts/shiftSlice';
 import { closeShift, getShiftByLocalId, getShiftInvoiceDetails, getShiftInvoiceSyncStatus, markShiftClosingSynced, markShiftOpeningSynced, openShift } from '@/src/infrastructure/db/shifts.repository';
-import { getAppConfig } from '@/src/services/configStore';
 import { clearUserTokens } from '@/src/services/api/tokenManager';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -28,6 +28,7 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
   const isShiftOpen = useAppSelector(selectIsShiftOpen);
   const shiftLocalId = useAppSelector(selectShiftLocalId);
   const shiftOpeningId = useAppSelector(selectShiftOpeningId);
+  const appConfig = useAppSelector(selectAppConfig);
   const dispatch = useAppDispatch();
   const router = useRouter();
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -185,7 +186,6 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
             // Fire-and-forget: attempt immediate sync with server
             (async () => {
               try {
-                const appConfig = await getAppConfig();
                 const company = appConfig?.zatca?.company_name || '';
                 const posProfile = selectedPosProfile || '';
                 const userEmail = user?.email || '';
@@ -273,7 +273,6 @@ export function TopBar({ onMenuPress, showMenuButton = true }: TopBarProps) {
                   return;
                 }
 
-                const appConfig = await getAppConfig();
                 const company = appConfig?.zatca?.company_name || '';
 
                 const details = await getShiftInvoiceDetails(db, currentShiftLocalId);

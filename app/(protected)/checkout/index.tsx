@@ -35,7 +35,8 @@ import {
   markInvoiceSyncError,
   saveInvoiceToDb,
 } from '@/src/infrastructure/db/invoices.repository';
-import { getAppConfig } from '@/src/services/configStore';
+import { selectAppConfig } from '@/src/features/app/appConfigSlice';
+import { getMachineName } from '@/src/services/credentialStore';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -81,6 +82,7 @@ export default function CheckoutPage() {
   const shiftLocalId = useAppSelector(selectShiftLocalId);
   const shiftOpeningId = useAppSelector(selectShiftOpeningId);
   const selectedPosProfile = useAppSelector((state) => state.auth.selectedPosProfile);
+  const appConfig = useAppSelector(selectAppConfig);
   const { data: customers } = useCustomers();
   const { create: createZatcaInvoice, isLoading: isCreatingInvoice } = useCreateInvoice();
 
@@ -177,7 +179,6 @@ export default function CheckoutPage() {
       // Fall back to the initial PIH that was provisioned in the app config.
       let previousInvoiceHash = await AsyncStorage.getItem(PIH_STORAGE_KEY);
       if (!previousInvoiceHash) {
-        const appConfig = await getAppConfig();
         previousInvoiceHash = appConfig?.zatca?.pih ?? '';
       }
 
@@ -579,9 +580,8 @@ export default function CheckoutPage() {
                             return;
                           }
 
-                          const appConfig = await getAppConfig();
                           const phase = appConfig?.phase || '1';
-                          const machineName = process.env.EXPO_PUBLIC_MACHINE_NAME || 'UNKNOWN';
+                          const machineName = await getMachineName() || 'UNKNOWN';
 
                           // Build items JSON array
                           const itemsJson = JSON.stringify(
@@ -686,10 +686,9 @@ export default function CheckoutPage() {
                                   );
                                 if (!invoiceData) return;
 
-                                const appConfig = await getAppConfig();
                                 const phase = appConfig?.phase || '1';
                                 const machineName =
-                                  process.env.EXPO_PUBLIC_MACHINE_NAME || 'UNKNOWN';
+                                  await getMachineName() || 'UNKNOWN';
 
                                 const itemsJson = JSON.stringify(
                                   invoiceData.items.map((item) => ({

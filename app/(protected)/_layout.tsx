@@ -1,3 +1,4 @@
+import { selectAppConfig } from '@/src/features/app/appConfigSlice';
 import { pushPendingCustomers, syncAllCustomers } from '@/src/infrastructure/db/customers.repository';
 import { syncAllProducts } from '@/src/infrastructure/db/products.repository';
 import { pushPendingOpenShifts } from '@/src/infrastructure/db/shifts.repository';
@@ -14,7 +15,6 @@ import { Drawer } from 'expo-router/drawer';
 import { openDatabaseSync } from 'expo-sqlite';
 import { useEffect, useRef } from 'react';
 import { View, useWindowDimensions } from 'react-native';
-import { getAppConfig } from '@/src/services/configStore';
 
 const expoDb = openDatabaseSync('van_pos.db', { enableChangeListener: true });
 const db = drizzle(expoDb);
@@ -24,6 +24,7 @@ export default function ProtectedLayout() {
   const user = useAppSelector(selectUser);
   const selectedPosProfile = useAppSelector(selectSelectedPosProfile);
   const currentShiftLocalId = useAppSelector(selectShiftLocalId);
+  const appConfig = useAppSelector(selectAppConfig);
   const dispatch = useAppDispatch();
   const { width } = useWindowDimensions();
   const isDesktop = width >= 1024;
@@ -58,7 +59,6 @@ export default function ProtectedLayout() {
       // Push pending open shifts
       (async () => {
         try {
-          const appConfig = await getAppConfig();
           const company = appConfig?.zatca?.company_name || '';
           const posProfile = selectedPosProfile || '';
           const userEmail = user?.email || '';

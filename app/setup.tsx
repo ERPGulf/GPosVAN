@@ -1,5 +1,7 @@
-import type { AppConfig } from '@/src/features/app/types';
-import { saveAppConfig } from '@/src/services/configStore';
+import {
+  saveCredentials,
+  validateSetupJson,
+} from '@/src/services/credentialStore';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import React, { useState } from 'react';
@@ -16,69 +18,34 @@ import {
 } from 'react-native';
 
 /**
- * Minimal validation: checks that the parsed JSON has the required
- * top-level keys of the AppConfig type.
- */
-function validateAppConfig(data: unknown): data is AppConfig {
-  if (typeof data !== 'object' || data === null) return false;
-
-  const obj = data as Record<string, unknown>;
-
-  const requiredKeys: (keyof AppConfig)[] = [
-    'discount_field',
-    'prefix',
-    'item_code_total_digits',
-    'item_code_starting_position',
-    'weight_starting_position',
-    'weight_total_digitsexcluding_decimal',
-    'no_of_decimal_in_weights',
-    'price_included_in_barcode_or_not',
-    'price_starting_position',
-    'price_total_digitsexcluding_decimals',
-    'no_of_decimal_in_price',
-    'inclusive',
-    'tax_percentage',
-    'phase',
-    'zatca',
-    'cardpay_settings',
-    'branch_details',
-  ];
-
-  for (const key of requiredKeys) {
-    if (!(key in obj)) return false;
-  }
-
-  if (typeof obj.zatca !== 'object' || obj.zatca === null) return false;
-  if (typeof obj.cardpay_settings !== 'object' || obj.cardpay_settings === null)
-    return false;
-  if (typeof obj.branch_details !== 'object' || obj.branch_details === null)
-    return false;
-
-  return true;
-}
-
-/**
- * Shared logic: parse, validate, and save config JSON string.
+ * Shared logic: parse, validate, and save credentials JSON string.
+ * Expected format: { "Settings": { "Host": "...", "API_KEY": "...", ... } }
  * Returns an error message string on failure, or null on success.
  */
-async function processConfigJson(content: string): Promise<string | null> {
+async function processSetupJson(content: string): Promise<string | null> {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(content);
+    // Sanitize input to fix common copy-paste issues (non-breaking spaces, smart quotes)
+    const sanitizedContent = content
+      .replace(/[\u00A0\u200B-\u200D\uFEFF]/g, ' ')
+      .replace(/[“”]/g, '"');
+    
+    parsed = JSON.parse(sanitizedContent);
     console.log('[SetupScreen] JSON parsed successfully');
-  } catch {
-    console.error('[SetupScreen] Failed to parse JSON');
-    return 'Invalid JSON. Please check the format.';
+  } catch (error: any) {
+    console.error('[SetupScreen] Failed to parse JSON:', error);
+    return `Invalid JSON. Please check the format. Details: ${error.message}`;
   }
 
-  if (!validateAppConfig(parsed)) {
+  if (!validateSetupJson(parsed)) {
     console.error('[SetupScreen] Validation failed — missing required fields');
-    return 'Invalid configuration. The JSON is missing required fields.';
+    return 'Invalid configuration. The JSON must contain a "Settings" object with Host, API_KEY, API_SECRET, APP_KEY, CLIENT_SECRET, MACHINE_NAME, INVOICE_PREFIX, and BRANCH_ID.';
   }
 
-  console.log('[SetupScreen] Validation passed, saving config...');
-  await saveAppConfig(parsed);
-  console.log('[SetupScreen] Config saved successfully');
+  console.log('[SetupScreen] Validation passed, saving credentials...');
+  await saveCredentials(parsed.Settings);
+  console.log('[SetupScreen] Credentials saved successfully:');
+  console.log(JSON.stringify(parsed.Settings, null, 2));
   return null;
 }
 
@@ -130,7 +97,7 @@ export default function SetupScreen({ onConfigured }: SetupScreenProps) {
       const content = fileObj.textSync();
       console.log(`[SetupScreen] File read successfully (${content.length} chars)`);
 
-      const error = await processConfigJson(content);
+      const error = await processSetupJson(content);
       if (error) {
         setStatus('error');
         setErrorMessage(error);
@@ -138,7 +105,7 @@ export default function SetupScreen({ onConfigured }: SetupScreenProps) {
       }
 
       setStatus('success');
-      console.log('[SetupScreen] Config saved, transitioning to app...');
+      console.log('[SetupScreen] Credentials saved, transitioning to app...');
       setTimeout(() => onConfigured(), 1000);
     } catch (err) {
       console.error('[SetupScreen] Error:', err);
@@ -160,7 +127,7 @@ export default function SetupScreen({ onConfigured }: SetupScreenProps) {
 
     try {
       console.log('[SetupScreen] Processing pasted JSON...');
-      const error = await processConfigJson(pastedJson.trim());
+      const error = await processSetupJson(pastedJson.trim());
       if (error) {
         setPasteError(error);
         setPasteLoading(false);
@@ -170,7 +137,7 @@ export default function SetupScreen({ onConfigured }: SetupScreenProps) {
       setPasteLoading(false);
       setPasteModalVisible(false);
       setStatus('success');
-      console.log('[SetupScreen] Pasted config saved, transitioning to app...');
+      console.log('[SetupScreen] Pasted credentials saved, transitioning to app...');
       setTimeout(() => onConfigured(), 1000);
     } catch (err) {
       console.error('[SetupScreen] Paste error:', err);
@@ -198,7 +165,7 @@ export default function SetupScreen({ onConfigured }: SetupScreenProps) {
         <View className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
           <Text className="text-blue-700 text-center text-sm leading-5">
             Welcome! To get started, upload your configuration file or paste the
-            JSON data.
+            JSON data containing your API credentials.
           </Text>
         </View>
 
@@ -215,7 +182,7 @@ export default function SetupScreen({ onConfigured }: SetupScreenProps) {
         {status === 'success' && (
           <View className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
             <Text className="text-green-600 text-center font-medium text-sm">
-              ✓ Configuration saved successfully! Redirecting…
+              ✓ Credentials saved successfully! Redirecting…
             </Text>
           </View>
         )}

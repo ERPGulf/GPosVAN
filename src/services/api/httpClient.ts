@@ -1,3 +1,10 @@
+import {
+  getApiKey,
+  getApiSecret,
+  getAppKey,
+  getClientSecret,
+  getHostUrl,
+} from '@/src/services/credentialStore';
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import {
   AppTokenResponse,
@@ -15,12 +22,13 @@ import {
 // ─── Axios Instances ─────────────────────────────────────────────────────────
 
 /**
- * Bare axios client for token-related API calls (no interceptors).
+ * Bare axios client for token-related API calls (no auth interceptors).
  * Used for: generate_token_secure, generate_token_secure_for_users,
  * create_refresh_token, getOfflinePOSUsers
+ *
+ * Base URL is set dynamically via interceptor (reads Host from SecureStore).
  */
 export const tokenClient = axios.create({
-  baseURL: process.env.EXPO_PUBLIC_API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -29,13 +37,34 @@ export const tokenClient = axios.create({
 /**
  * Main API client — auto-attaches user Bearer token via interceptors.
  * Used for: products, customers, and all other authenticated API calls.
+ *
+ * Base URL is set dynamically via interceptor (reads Host from SecureStore).
  */
 export const apiClient = axios.create({
-  baseURL: process.env.EXPO_PUBLIC_API_URL,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+// ─── Shared Base URL Interceptor ─────────────────────────────────────────────
+
+/**
+ * Request interceptor that dynamically sets baseURL from SecureStore.
+ * Uses in-memory cache (inside getHostUrl) to avoid hitting SecureStore every time.
+ */
+const attachBaseUrl = async (config: InternalAxiosRequestConfig) => {
+  if (!config.baseURL) {
+    const host = await getHostUrl();
+    if (host) {
+      config.baseURL = host;
+    }
+  }
+  return config;
+};
+
+// Attach base URL interceptor to both clients
+tokenClient.interceptors.request.use(attachBaseUrl, (err) => Promise.reject(err));
+apiClient.interceptors.request.use(attachBaseUrl, (err) => Promise.reject(err));
 
 // ─── apiClient Interceptors ─────────────────────────────────────────────────
 
@@ -98,17 +127,30 @@ apiClient.interceptors.response.use(
 // ─── App Token (Transient, Not Stored) ───────────────────────────────────────
 
 /**
- * Generate an app token using API credentials.
+ * Generate an app token using API credentials from SecureStore.
  * The app token is NOT stored — it is returned for immediate use.
+ * Sends client_secret as a header.
  */
 export const generateAppToken = async (): Promise<string> => {
   try {
+    const [apiKey, apiSecret, appKey, clientSecret] = await Promise.all([
+      getApiKey(),
+      getApiSecret(),
+      getAppKey(),
+      getClientSecret(),
+    ]);
+
     const response = await tokenClient.post<{ data: AppTokenResponse['data'] }>(
       '/gpos.gpos.pos.generate_token_secure',
       {
-        api_key: process.env.EXPO_PUBLIC_API_KEY,
-        api_secret: process.env.EXPO_PUBLIC_API_SECRET,
-        app_key: process.env.EXPO_PUBLIC_APP_KEY,
+        api_key: apiKey,
+        api_secret: apiSecret,
+        app_key: appKey,
+      },
+      {
+        headers: {
+          client_secret: clientSecret || '',
+        },
       },
     );
 
@@ -142,10 +184,12 @@ export const generateUserToken = async (
   appToken: string,
 ): Promise<UserTokenResponse['data']> => {
   try {
+    const appKey = await getAppKey();
+
     const params = new URLSearchParams();
     params.append('username', email);
     params.append('password', password);
-    params.append('app_key', process.env.EXPO_PUBLIC_APP_KEY || '');
+    params.append('app_key', appKey || '');
 
     const response = await tokenClient.get<{ data: UserTokenResponse['data'] }>(
       '/gpos.gpos.pos.generate_token_secure_for_users',

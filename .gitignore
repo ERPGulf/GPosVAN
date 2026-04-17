@@ -45,3 +45,5 @@ app-example
 # native module build outputs
 modules/**/android/build/
 modules/**/ios/build/
+
+.agent/
