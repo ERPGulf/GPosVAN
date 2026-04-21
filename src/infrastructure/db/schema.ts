@@ -220,8 +220,8 @@ export const invoiceIdSequence = sqliteTable('InvoiceIdSequence', {
 export const promotions = sqliteTable('Promotions', {
   promotionId: text('PromotionId').primaryKey(),
   disabled: integer('Disabled', { mode: 'boolean' }).default(false),
-  validFrom: text('ValidFrom').notNull(),
-  validUpto: text('ValidUpto').notNull(),
+  validFrom: integer('ValidFrom', { mode: 'timestamp' }).notNull(),
+  validUpto: integer('ValidUpto', { mode: 'timestamp' }).notNull(),
 });
 
 // Promotion relations
