@@ -29,6 +29,13 @@
       "when": 1743520800000,
       "tag": "0003_add_invoice_sequence",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1745220000000,
+      "tag": "0004_add_promotion_tables",
+      "breakpoints": true
     }
   ]
 }

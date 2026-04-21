@@ -215,3 +215,42 @@ export const invoiceIdSequence = sqliteTable('InvoiceIdSequence', {
   id: integer('id').primaryKey(), // always row id = 1
   sequence: integer('sequence').default(0),
 });
+
+// Promotion table
+export const promotions = sqliteTable('Promotions', {
+  promotionId: text('PromotionId').primaryKey(),
+  disabled: integer('Disabled', { mode: 'boolean' }).default(false),
+  validFrom: text('ValidFrom').notNull(),
+  validUpto: text('ValidUpto').notNull(),
+});
+
+// Promotion relations
+export const promotionsRelations = relations(promotions, ({ many }) => ({
+  items: many(promotionItems),
+}));
+
+// PromotionItems table
+export const promotionItems = sqliteTable('PromotionItems', {
+  id: text('ItemId').primaryKey(),
+  itemCode: text('ItemCode').notNull(),
+  itemName: text('ItemName'),
+  discountType: text('DiscountType'),
+  minQty: integer('MinQty').default(0),
+  maxQty: integer('MaxQty').default(0),
+  discountPercentage: real('DiscountPercentage').default(0),
+  discountPrice: real('DiscountPrice').default(0),
+  rate: real('Rate').default(0),
+  uomId: text('UomId'),
+  uom: text('uom'),
+  createOn: integer('CreateOn', { mode: 'timestamp' }),
+  updatedOn: integer('UpdatedOn', { mode: 'timestamp' }),
+  promotionId: text('PromotionId').references(() => promotions.promotionId),
+});
+
+// PromotionItems relations
+export const promotionItemsRelations = relations(promotionItems, ({ one }) => ({
+  promotion: one(promotions, {
+    fields: [promotionItems.promotionId],
+    references: [promotions.promotionId],
+  }),
+}));
