@@ -1,4 +1,4 @@
-import { addToCart, removeFromCart, selectCartItems, updateQuantity } from '@/src/features/cart/cartSlice';
+import { addToCartAsync, removeFromCart, selectCartItems, updateQuantityAsync } from '@/src/features/cart/cartSlice';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
 import { ProductList } from '@/src/features/products/components/ProductList';
 import { useBarcodes, useCategories, useProducts } from '@/src/features/products/hooks/useProducts';
@@ -134,7 +134,7 @@ export default function App() {
                         </Text>
                     </View>
                 ) : (
-                    <ProductList products={filteredProducts} onAddToCart={(product) => dispatch(addToCart(product))} />
+                    <ProductList products={filteredProducts} onAddToCart={(product) => dispatch(addToCartAsync(product))} />
                 )}
             </View>
 
@@ -143,7 +143,7 @@ export default function App() {
                 <OrderSummary
                     cartItems={cartItems}
                     onRemoveItem={(index) => dispatch(removeFromCart(index))}
-                    onUpdateQuantity={(index, delta) => dispatch(updateQuantity({ index, delta }))}
+                    onUpdateQuantity={(index, delta) => dispatch(updateQuantityAsync({ index, delta }))}
                     onCheckout={() => router.push('/checkout')}
                 />
             </View>

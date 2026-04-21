@@ -4,7 +4,8 @@ import {
   removeFromCart,
   selectCartItems,
   selectTotal,
-  updateQuantity,
+  selectDiscount,
+  updateQuantityAsync,
 } from '@/src/features/cart/cartSlice';
 import { AddCustomerModal } from '@/src/features/customers/components/AddCustomerModal';
 import { useCustomers } from '@/src/features/customers/hooks/useCustomers';
@@ -78,6 +79,7 @@ export default function CheckoutPage() {
   const db = drizzle(sqliteDb);
   const cartItems = useAppSelector(selectCartItems);
   const total = useAppSelector(selectTotal);
+  const totalDiscount = useAppSelector(selectDiscount);
   const user = useAppSelector(selectUser);
   const shiftLocalId = useAppSelector(selectShiftLocalId);
   const shiftOpeningId = useAppSelector(selectShiftOpeningId);
@@ -209,7 +211,7 @@ export default function CheckoutPage() {
         invoiceDate: new Date(),
         previousInvoiceHash,
         invoiceNumber: String(Date.now()),
-        discount: 0,
+        discount: totalDiscount,
         invoiceTypeCode: '388',
         // Basic routing: selected customer => standard invoice, otherwise simplified.
         invoiceSubType: selectedCustomer ? '0100000' : '0200000',
@@ -237,7 +239,7 @@ export default function CheckoutPage() {
         userId: user?.id ?? null,
         posProfile: selectedPosProfile ?? null,
         previousInvoiceHash: previousInvoiceHash,
-        discount: 0,
+        discount: totalDiscount,
         cartItems,
         paymentMethod: selectedPaymentMethod,
         cashAmount: parseFloat(cashAmount) || 0,
@@ -490,7 +492,7 @@ export default function CheckoutPage() {
           <OrderSummary
             cartItems={cartItems}
             onRemoveItem={(index) => dispatch(removeFromCart(index))}
-            onUpdateQuantity={(index, delta) => dispatch(updateQuantity({ index, delta }))}
+            onUpdateQuantity={(index, delta) => dispatch(updateQuantityAsync({ index, delta }))}
             onCheckout={() => {}}
             showActions={false}
           />
