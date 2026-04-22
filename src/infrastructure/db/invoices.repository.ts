@@ -7,16 +7,13 @@ import { store } from '@/src/store/store';
 
 // ─── Invoice number generator ────────────────────────────────────────────────
 
-function formatDate(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}${m}${d}`;
+function formatYear(date: Date): string {
+  return String(date.getFullYear());
 }
 
 /**
  * Atomically increments the global invoice sequence counter and returns a
- * formatted invoice number: INV-YYYYMMDD-XXXXXX (e.g. INV-20260401-000042)
+ * formatted invoice number: INV-YYYY-XXXXXX (e.g. INV-2026-000042)
  */
 export async function getNextInvoiceNo(db: ExpoSQLiteDatabase): Promise<string> {
   const appConfig = store.getState().appConfig.config;
@@ -38,7 +35,7 @@ export async function getNextInvoiceNo(db: ExpoSQLiteDatabase): Promise<string> 
     .limit(1);
 
   const seq = row[0]?.sequence ?? 1;
-  const dateStr = formatDate(new Date());
+  const dateStr = formatYear(new Date());
   const paddedSeq = String(seq).padStart(6, '0');
   return `${prefix}-${dateStr}-${paddedSeq}`;
 }
