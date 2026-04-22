@@ -1,6 +1,7 @@
 import { selectAppConfig } from '@/src/features/app/appConfigSlice';
 import { pushPendingCustomers, syncAllCustomers } from '@/src/infrastructure/db/customers.repository';
 import { syncAllProducts } from '@/src/infrastructure/db/products.repository';
+import { syncAllPromotions } from '@/src/infrastructure/db/promotions.repository';
 import { pushPendingOpenShifts } from '@/src/infrastructure/db/shifts.repository';
 import { selectIsAuthenticated, selectUser, selectSelectedPosProfile, setPosProfile } from '@/src/features/auth/authSlice';
 import { selectShiftLocalId, setShiftOpeningId } from '@/src/features/shifts/shiftSlice';
@@ -108,6 +109,23 @@ export default function ProtectedLayout() {
       ]);
     });
   }, [isAuthenticated]);
+
+  // Sync promotions once POS profile is available
+  const hasPromotionsSynced = useRef(false);
+  useEffect(() => {
+    if (!isAuthenticated || !selectedPosProfile || hasPromotionsSynced.current) return;
+    hasPromotionsSynced.current = true;
+
+    syncAllPromotions(db, selectedPosProfile)
+      .then(() => {
+        if (__DEV__) {
+          console.log('[ProtectedLayout] Promotions synced successfully');
+        }
+      })
+      .catch((err) => {
+        console.error('[ProtectedLayout] Failed to sync promotions:', err);
+      });
+  }, [isAuthenticated, selectedPosProfile]);
 
   // Redirect to login if not authenticated
   if (!isAuthenticated) {
