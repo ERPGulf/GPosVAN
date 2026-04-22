@@ -25,7 +25,7 @@ import {
 import * as yup from 'yup';
 import './global.css';
 
-// Validation schema
+// Validation schemas
 const loginSchema = yup.object().shape({
   email: yup.string().required('Email is required'),
   password: yup.string().required('Password is required'),
