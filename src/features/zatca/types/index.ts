@@ -48,6 +48,7 @@ export interface InvoiceParams {
   discount: number;
   invoiceTypeCode: InvoiceTypeCode;
   invoiceSubType: InvoiceSubType;
+  billingReference?: string; // original invoice ID for credit notes (type 381)
 }
 
 export interface InvoiceResult {

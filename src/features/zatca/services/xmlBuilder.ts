@@ -581,6 +581,22 @@ export function buildSignedPropertiesObject(
   );
 }
 
+// --- Billing Reference (Credit Notes) ---
+
+/**
+ * Build the BillingReference element for credit notes (type 381).
+ * Links the credit note back to the original invoice being returned against.
+ */
+function buildBillingReference(originalInvoiceId: string): string {
+  return (
+    `\n  <cac:BillingReference>` +
+    `\n    <cac:InvoiceDocumentReference>` +
+    `\n      <cbc:ID>${escapeXml(originalInvoiceId)}</cbc:ID>` +
+    `\n    </cac:InvoiceDocumentReference>` +
+    `\n  </cac:BillingReference>`
+  );
+}
+
 // --- Main XML Builder ---
 
 export interface BuildInvoiceXmlParams {
@@ -596,6 +612,7 @@ export interface BuildInvoiceXmlParams {
   totalExcludeTax: number;
   discount: number;
   config: ZatcaConfig;
+  billingReference?: string; // original invoice ID for credit notes (type 381)
 }
 
 /**
@@ -613,6 +630,7 @@ export function buildBaseInvoiceXml(params: BuildInvoiceXmlParams): string {
     cartItems,
     discount,
     config,
+    billingReference,
   } = params;
   const breakdown = calculateInvoiceTaxBreakdown(cartItems, config.isTaxIncludedInPrice, discount);
 
@@ -624,6 +642,10 @@ export function buildBaseInvoiceXml(params: BuildInvoiceXmlParams): string {
   let xml = `<?xml version="1.0" encoding="UTF-8"?>`;
   xml += `\n<Invoice xmlns="${xmlns}" xmlns:cac="${xmlns_cac}" xmlns:cbc="${xmlns_cbc}" xmlns:ext="${xmlns_ext}">`;
   xml += buildBaseXmlTags(invoiceNumber, invoiceDate, uuid, invoiceTypeCode, invoiceSubType);
+  // BillingReference: required for credit notes (type 381) to link back to original invoice
+  if (billingReference) {
+    xml += buildBillingReference(billingReference);
+  }
   xml += buildAdditionalReferenceTags(invoiceNumber, previousInvoiceHash);
   xml += buildQRTag();
   xml += buildAccountingSupplierParty(config);
