@@ -163,6 +163,7 @@ export default function ProtectedLayout() {
         <Drawer.Screen name="index" options={{ title: 'Dashboard' }} />
         <Drawer.Screen name="customers/index" options={{ title: 'Customers' }} />
         <Drawer.Screen name="checkout/index" options={{ title: 'Checkout' }} />
+        <Drawer.Screen name="sales-return/index" options={{ title: 'Sales Return' }} />
         <Drawer.Screen name="settings/page" options={{ title: 'Settings' }} />
       </Drawer>
     </View>
