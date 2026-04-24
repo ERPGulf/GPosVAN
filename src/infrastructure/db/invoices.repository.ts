@@ -7,16 +7,13 @@ import { store } from '@/src/store/store';
 
 // ─── Invoice number generator ────────────────────────────────────────────────
 
-function formatDate(date: Date): string {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}${m}${d}`;
+function formatYear(date: Date): string {
+  return String(date.getFullYear());
 }
 
 /**
  * Atomically increments the global invoice sequence counter and returns a
- * formatted invoice number: INV-YYYYMMDD-XXXXXX (e.g. INV-20260401-000042)
+ * formatted invoice number: INV-YYYY-XXXXXX (e.g. INV-2026-000042)
  */
 export async function getNextInvoiceNo(db: ExpoSQLiteDatabase): Promise<string> {
   const appConfig = store.getState().appConfig.config;
@@ -38,7 +35,7 @@ export async function getNextInvoiceNo(db: ExpoSQLiteDatabase): Promise<string> 
     .limit(1);
 
   const seq = row[0]?.sequence ?? 1;
-  const dateStr = formatDate(new Date());
+  const dateStr = formatYear(new Date());
   const paddedSeq = String(seq).padStart(6, '0');
   return `${prefix}-${dateStr}-${paddedSeq}`;
 }
@@ -89,21 +86,83 @@ export async function saveInvoiceToDb(
       isErrorSynced: false,
     });
 
-    // 2. Insert InvoiceItems — one row per cart item
+    // 2. Insert InvoiceItems — SplitByPromotion
+    //    If a cart item has a promotion and qty > maxQty:
+    //      → Row 1: discounted portion (qty = maxQty, with discount fields)
+    //      → Row 2: remaining portion (qty = total - maxQty, at full price)
+    //    If qty <= maxQty: single row with discount fields.
+    //    If no promotion: single row at full price.
     for (const item of params.cartItems) {
-      await tx.insert(invoiceItems).values({
-        itemCode: item.product.itemCode,
-        itemName: item.product.name,
-        quantity: item.quantity,
-        rate: item.product.uomPrice ?? item.product.price ?? 0,
-        taxPercentage: item.product.taxPercentage ?? 15,
-        unitOfMeasure: item.product.uom,
-        invoiceEntityId: params.invoiceUUID,
-        discountType: null,
-        minQty: 0,
-        maxQty: 0,
-        discountValue: 0,
-      });
+      const originalRate = item.product.uomPrice ?? item.product.price ?? 0;
+      const taxPct = item.product.taxPercentage ?? 15;
+
+      if (item.promotion) {
+        const eligibleQty = Math.min(item.quantity, item.promotion.maxQty);
+        const remainingQty = item.quantity - eligibleQty;
+
+        // Determine the discountValue to store based on discount type
+        let discountValue = 0;
+        switch (item.promotion.discountType) {
+          case 'RATE':
+            discountValue = item.promotion.discountPrice;
+            break;
+          case 'PERCENTAGE':
+            discountValue = item.promotion.discountPercentage;
+            break;
+          case 'AMOUNT':
+            discountValue = item.promotion.discountPrice;
+            break;
+        }
+
+        // Row 1: Discounted portion
+        if (eligibleQty > 0) {
+          await tx.insert(invoiceItems).values({
+            itemCode: item.product.itemCode,
+            itemName: item.product.name,
+            quantity: eligibleQty,
+            rate: originalRate,
+            taxPercentage: taxPct,
+            unitOfMeasure: item.product.uom,
+            invoiceEntityId: params.invoiceUUID,
+            discountType: item.promotion.discountType,
+            minQty: item.promotion.minQty,
+            maxQty: item.promotion.maxQty,
+            discountValue,
+          });
+        }
+
+        // Row 2: Remaining at full price (only if there's overflow)
+        if (remainingQty > 0) {
+          await tx.insert(invoiceItems).values({
+            itemCode: item.product.itemCode,
+            itemName: item.product.name,
+            quantity: remainingQty,
+            rate: originalRate,
+            taxPercentage: taxPct,
+            unitOfMeasure: item.product.uom,
+            invoiceEntityId: params.invoiceUUID,
+            discountType: null,
+            minQty: 0,
+            maxQty: 0,
+            discountValue: 0,
+          });
+        }
+      } else {
+        // No promotion — single row at full price
+        await tx.insert(invoiceItems).values({
+          itemCode: item.product.itemCode,
+          itemName: item.product.name,
+          quantity: item.quantity,
+          rate: originalRate,
+          taxPercentage: taxPct,
+          unitOfMeasure: item.product.uom,
+          invoiceEntityId: params.invoiceUUID,
+          discountType: null,
+          minQty: 0,
+          maxQty: 0,
+          discountValue: 0,
+        });
+      }
     }
 
     // 3. Insert InvoicePayments — split rows as needed

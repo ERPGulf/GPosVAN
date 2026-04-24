@@ -1,4 +1,4 @@
-import { setAppConfig, selectAppConfig } from '@/src/features/app/appConfigSlice';
+import { selectAppConfig, setAppConfig } from '@/src/features/app/appConfigSlice';
 import { fetchPosSettings } from '@/src/features/app/services/posSettings.service';
 import { login } from '@/src/features/auth/authSlice';
 import * as schema from '@/src/infrastructure/db/schema';
@@ -15,6 +15,7 @@ import React, { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Text,
@@ -200,11 +201,15 @@ export default function LoginScreen() {
         <View className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
           {/* Header */}
           <View className="items-center mb-8">
-            <View className="w-16 h-16 bg-green-500 rounded-2xl items-center justify-center mb-4 shadow-lg">
-              <Text className="text-3xl text-white font-bold">V</Text>
+            <View className="w-72 h-20 ">
+              <Image
+                source={require('@/assets/images/logo.png')}
+                className="w-full h-full"
+                resizeMode="cover"
+              />
             </View>
-            <Text className="text-2xl font-bold text-gray-800">GPos Van</Text>
-            <Text className="text-gray-500 mt-1">Sign in to continue</Text>
+            <Text className="text-xl font-bold text-gray-800 mt-2">Sign in to continue</Text>
+
           </View>
 
           {/* Error Message */}
