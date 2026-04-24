@@ -1,13 +1,14 @@
 import { logout, selectUser } from '@/src/features/auth/authSlice';
-import { clearUserTokens } from '@/src/services/api/tokenManager';
 import { clearCart } from '@/src/features/cart/cartSlice';
 import { selectIsShiftOpen } from '@/src/features/shifts/shiftSlice';
+import { clearUserTokens } from '@/src/services/api/tokenManager';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import type { DrawerContentComponentProps } from '@react-navigation/drawer';
 import { useRouter } from 'expo-router';
 import React from 'react';
-import { Alert, Pressable, Text, View } from 'react-native';
+import { Alert, Image, Pressable, Text, View } from 'react-native';
+
 
 type NavItem = {
   name: string;
@@ -98,10 +99,13 @@ export function Sidebar({ drawerProps, onToggle }: SidebarProps) {
       <View className="gap-6">
         <View className="flex-row items-center justify-between">
           <View className="flex-row items-center gap-2">
-            <View className="bg-green-500 rounded-lg p-1.5">
-              <MaterialCommunityIcons name="clover" size={20} color="white" />
+            <View className="w-52 h-16  ">
+              <Image
+                source={require('@/assets/images/logo.png')}
+                className="w-full h-full"
+                resizeMode="cover"
+              />
             </View>
-            <Text className="text-lg font-semibold text-gray-800">GPosVan</Text>
           </View>
 
           {!!onToggle && (
@@ -126,9 +130,8 @@ export function Sidebar({ drawerProps, onToggle }: SidebarProps) {
               <Pressable
                 key={item.name}
                 onPress={() => handlePress(item.routeName, item.routePath)}
-                className={`flex-row items-center gap-3 rounded-xl px-3 py-3 ${
-                  isActive ? 'bg-green-50 border border-green-100' : 'bg-transparent'
-                }`}>
+                className={`flex-row items-center gap-3 rounded-xl px-3 py-3 ${isActive ? 'bg-green-50 border border-green-100' : 'bg-transparent'
+                  }`}>
                 <MaterialCommunityIcons
                   name={item.icon}
                   size={22}
@@ -147,18 +150,16 @@ export function Sidebar({ drawerProps, onToggle }: SidebarProps) {
       <View className="gap-2 pb-1">
         <Pressable
           onPress={() => handlePress('settings/page', '/settings/page')}
-          className={`flex-row items-center gap-3 rounded-xl px-3 py-3 ${
-            isSettingsActive ? 'bg-green-50 border border-green-100' : 'bg-transparent'
-          }`}>
+          className={`flex-row items-center gap-3 rounded-xl px-3 py-3 ${isSettingsActive ? 'bg-green-50 border border-green-100' : 'bg-transparent'
+            }`}>
           <Ionicons
             name="settings-outline"
             size={22}
             color={isSettingsActive ? '#22c55e' : '#6b7280'}
           />
           <Text
-            className={`text-sm font-medium ${
-              isSettingsActive ? 'text-green-700' : 'text-gray-700'
-            }`}>
+            className={`text-sm font-medium ${isSettingsActive ? 'text-green-700' : 'text-gray-700'
+              }`}>
             Settings
           </Text>
         </Pressable>
