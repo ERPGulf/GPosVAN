@@ -1,15 +1,12 @@
-import {
-  saveCredentials,
-  validateSetupJson,
-} from '@/src/services/credentialStore';
-import * as DocumentPicker from 'expo-document-picker';
-import { File } from 'expo-file-system';
+import type { SetupSettings } from '@/src/services/credentialStore';
+import { saveCredentials } from '@/src/services/credentialStore';
+import { yupResolver } from '@hookform/resolvers/yup';
 import React, { useState } from 'react';
+import { Controller, useForm } from 'react-hook-form';
 import {
   ActivityIndicator,
   Image,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   ScrollView,
   Text,
@@ -17,317 +14,260 @@ import {
   TouchableOpacity,
   View
 } from 'react-native';
+import * as yup from 'yup';
 
-/**
- * Shared logic: parse, validate, and save credentials JSON string.
- * Expected format: { "Settings": { "Host": "...", "API_KEY": "...", ... } }
- * Returns an error message string on failure, or null on success.
- */
-async function processSetupJson(content: string): Promise<string | null> {
-  let parsed: unknown;
-  try {
-    // Sanitize input to fix common copy-paste issues (non-breaking spaces, smart quotes)
-    const sanitizedContent = content
-      .replace(/[\u00A0\u200B-\u200D\uFEFF]/g, ' ')
-      .replace(/[“”]/g, '"');
+// ─── Validation Schema ──────────────────────────────────────────────────────
 
-    parsed = JSON.parse(sanitizedContent);
-    console.log('[SetupScreen] JSON parsed successfully');
-  } catch (error: any) {
-    console.error('[SetupScreen] Failed to parse JSON:', error);
-    return `Invalid JSON. Please check the format. Details: ${error.message}`;
-  }
+const setupSchema = yup.object().shape({
+  Host: yup
+    .string()
+    .required('Host URL is required')
+    .url('Must be a valid URL (e.g. https://example.com/api/method)'),
+  API_KEY: yup.string().required('API Key is required'),
+  API_SECRET: yup.string().required('API Secret is required'),
+  APP_KEY: yup.string().required('App Key is required'),
+  CLIENT_SECRET: yup.string().required('Client Secret is required'),
+  MACHINE_NAME: yup.string().required('Machine Name is required'),
+  INVOICE_PREFIX: yup.string().required('Invoice Prefix is required'),
+  BRANCH_ID: yup.string().required('Branch ID is required'),
+});
 
-  if (!validateSetupJson(parsed)) {
-    console.error('[SetupScreen] Validation failed — missing required fields');
-    return 'Invalid configuration. The JSON must contain a "Settings" object with Host, API_KEY, API_SECRET, APP_KEY, CLIENT_SECRET, MACHINE_NAME, INVOICE_PREFIX, and BRANCH_ID.';
-  }
+type SetupFormValues = yup.InferType<typeof setupSchema>;
 
-  console.log('[SetupScreen] Validation passed, saving credentials...');
-  await saveCredentials(parsed.Settings);
-  console.log('[SetupScreen] Credentials saved successfully:');
-  console.log(JSON.stringify(parsed.Settings, null, 2));
-  return null;
+// ─── Field configuration ────────────────────────────────────────────────────
+
+interface FieldConfig {
+  name: keyof SetupFormValues;
+  label: string;
+  placeholder: string;
+  secureTextEntry?: boolean;
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
+  keyboardType?: 'default' | 'url';
 }
+
+const FIELDS: FieldConfig[] = [
+  {
+    name: 'Host',
+    label: 'Host URL',
+    placeholder: 'https://example.com/api/method',
+    keyboardType: 'url',
+    autoCapitalize: 'none',
+  },
+  {
+    name: 'API_KEY',
+    label: 'API Key',
+    placeholder: 'API Key',
+    autoCapitalize: 'none',
+  },
+  {
+    name: 'API_SECRET',
+    label: 'API Secret',
+    placeholder: '••••••••',
+    secureTextEntry: true,
+    autoCapitalize: 'none',
+  },
+  {
+    name: 'APP_KEY',
+    label: 'App Key',
+    placeholder: 'Base64 encoded app key',
+    autoCapitalize: 'none',
+  },
+  {
+    name: 'CLIENT_SECRET',
+    label: 'Client Secret',
+    placeholder: 'Client secret',
+    secureTextEntry: true,
+    autoCapitalize: 'none',
+  },
+  {
+    name: 'MACHINE_NAME',
+    label: 'Machine Name',
+    placeholder: 'e.g. diaj6ei8fh',
+    autoCapitalize: 'none',
+  },
+  {
+    name: 'INVOICE_PREFIX',
+    label: 'Invoice Prefix',
+    placeholder: 'e.g. INV',
+    autoCapitalize: 'characters',
+  },
+  {
+    name: 'BRANCH_ID',
+    label: 'Branch ID',
+    placeholder: 'Branch ID',
+    autoCapitalize: 'none',
+  },
+];
+
+// ─── Component ───────────────────────────────────────────────────────────────
 
 interface SetupScreenProps {
   onConfigured: () => void;
 }
 
 export default function SetupScreen({ onConfigured }: SetupScreenProps) {
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
+  const [submitStatus, setSubmitStatus] = useState<
+    'idle' | 'loading' | 'success' | 'error'
+  >('idle');
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Paste modal state
-  const [pasteModalVisible, setPasteModalVisible] = useState(false);
-  const [pastedJson, setPastedJson] = useState('');
-  const [pasteError, setPasteError] = useState<string | null>(null);
-  const [pasteLoading, setPasteLoading] = useState(false);
+  const {
+    control,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<SetupFormValues>({
+    resolver: yupResolver(setupSchema),
+    defaultValues: {
+      Host: '',
+      API_KEY: '',
+      API_SECRET: '',
+      APP_KEY: '',
+      CLIENT_SECRET: '',
+      MACHINE_NAME: '',
+      INVOICE_PREFIX: '',
+      BRANCH_ID: '',
+    },
+  });
 
-  const handlePickFile = async () => {
+  const onSubmit = async (data: SetupFormValues) => {
     try {
-      setStatus('loading');
-      setErrorMessage(null);
+      setSubmitStatus('loading');
+      setSubmitError(null);
 
-      console.log('[SetupScreen] Opening document picker...');
-      const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*',
-        copyToCacheDirectory: true,
-      });
+      console.log('[SetupScreen] Saving credentials from form...');
+      const settings: SetupSettings = {
+        Host: data.Host,
+        API_KEY: data.API_KEY,
+        API_SECRET: data.API_SECRET,
+        APP_KEY: data.APP_KEY,
+        CLIENT_SECRET: data.CLIENT_SECRET,
+        MACHINE_NAME: data.MACHINE_NAME,
+        INVOICE_PREFIX: data.INVOICE_PREFIX,
+        BRANCH_ID: data.BRANCH_ID,
+      };
 
-      if (result.canceled) {
-        console.log('[SetupScreen] User cancelled file picker');
-        setStatus('idle');
-        return;
-      }
+      await saveCredentials(settings);
+      console.log('[SetupScreen] Credentials saved successfully');
 
-      const file = result.assets[0];
-      setFileName(file.name);
-      console.log(`[SetupScreen] File selected: ${file.name}`);
-
-      if (!file.name.toLowerCase().endsWith('.json')) {
-        console.error('[SetupScreen] Invalid file type:', file.name);
-        setStatus('error');
-        setErrorMessage('Please select a .json file.');
-        return;
-      }
-
-      console.log('[SetupScreen] Reading file contents...');
-      const fileObj = new File(file.uri);
-      const content = fileObj.textSync();
-      console.log(`[SetupScreen] File read successfully (${content.length} chars)`);
-
-      const error = await processSetupJson(content);
-      if (error) {
-        setStatus('error');
-        setErrorMessage(error);
-        return;
-      }
-
-      setStatus('success');
-      console.log('[SetupScreen] Credentials saved, transitioning to app...');
+      setSubmitStatus('success');
       setTimeout(() => onConfigured(), 1000);
     } catch (err) {
-      console.error('[SetupScreen] Error:', err);
-      setStatus('error');
-      setErrorMessage(
+      console.error('[SetupScreen] Error saving credentials:', err);
+      setSubmitStatus('error');
+      setSubmitError(
         err instanceof Error ? err.message : 'An unexpected error occurred.'
       );
-    }
-  };
-
-  const handlePasteSubmit = async () => {
-    if (!pastedJson.trim()) {
-      setPasteError('Please paste your JSON configuration.');
-      return;
-    }
-
-    setPasteLoading(true);
-    setPasteError(null);
-
-    try {
-      console.log('[SetupScreen] Processing pasted JSON...');
-      const error = await processSetupJson(pastedJson.trim());
-      if (error) {
-        setPasteError(error);
-        setPasteLoading(false);
-        return;
-      }
-
-      setPasteLoading(false);
-      setPasteModalVisible(false);
-      setStatus('success');
-      console.log('[SetupScreen] Pasted credentials saved, transitioning to app...');
-      setTimeout(() => onConfigured(), 1000);
-    } catch (err) {
-      console.error('[SetupScreen] Paste error:', err);
-      setPasteError(
-        err instanceof Error ? err.message : 'An unexpected error occurred.'
-      );
-      setPasteLoading(false);
     }
   };
 
   return (
-    <View className="flex-1 items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100 px-6">
-      {/* Setup Card */}
-      <View className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
-        {/* Header */}
-        <View className="items-center mb-8">
-          <View className="w-72 h-20 ">
-            <Image
-              source={require('@/assets/images/logo.png')}
-              className="w-full h-full"
-              resizeMode="cover"
-            />
-          </View>
-          <Text className="text-2xl font-bold text-gray-800 mt-1">Initial Setup</Text>
-
-        </View>
-
-        {/* Description */}
-        <View className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
-          <Text className="text-blue-700 text-center text-sm leading-5">
-            Welcome! To get started, upload your configuration file or paste the
-            JSON data containing your API credentials.
-          </Text>
-        </View>
-
-        {/* Error */}
-        {status === 'error' && errorMessage && (
-          <View className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
-            <Text className="text-red-600 text-center font-medium text-sm">
-              {errorMessage}
-            </Text>
-          </View>
-        )}
-
-        {/* Success */}
-        {status === 'success' && (
-          <View className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
-            <Text className="text-green-600 text-center font-medium text-sm">
-              ✓ Credentials saved successfully! Redirecting…
-            </Text>
-          </View>
-        )}
-
-        {/* File name indicator */}
-        {fileName && status !== 'success' && (
-          <View className="bg-gray-50 border border-gray-200 rounded-xl p-3 mb-4">
-            <Text className="text-gray-600 text-center text-sm" numberOfLines={1}>
-              📄 {fileName}
-            </Text>
-          </View>
-        )}
-
-        {/* Upload File Button */}
-        <TouchableOpacity
-          onPress={handlePickFile}
-          disabled={status === 'loading' || status === 'success'}
-          className={`w-full py-4 rounded-xl items-center justify-center shadow-lg ${status === 'loading' || status === 'success'
-            ? 'bg-green-400'
-            : 'bg-green-500'
-            }`}>
-          {status === 'loading' ? (
-            <ActivityIndicator color="white" />
-          ) : (
-            <Text className="text-white font-bold text-lg">
-              {status === 'error' ? 'Try Again' : 'Upload Configuration'}
-            </Text>
-          )}
-        </TouchableOpacity>
-
-        {/* Divider */}
-        <View className="flex-row items-center my-4">
-          <View className="flex-1 h-px bg-gray-200" />
-          <Text className="mx-3 text-gray-400 text-sm">or</Text>
-          <View className="flex-1 h-px bg-gray-200" />
-        </View>
-
-        {/* Paste JSON Button */}
-        <TouchableOpacity
-          onPress={() => {
-            setPastedJson('');
-            setPasteError(null);
-            setPasteModalVisible(true);
-          }}
-          disabled={status === 'success'}
-          className={`w-full py-4 rounded-xl items-center justify-center border-2 ${status === 'success'
-            ? 'border-gray-200 bg-gray-50'
-            : 'border-green-500 bg-white'
-            }`}>
-          <Text
-            className={`font-bold text-lg ${status === 'success' ? 'text-gray-400' : 'text-green-600'
-              }`}>
-            Paste JSON
-          </Text>
-        </TouchableOpacity>
-
-        {/* Accepted format */}
-        <View className="mt-4 items-center">
-          <Text className="text-gray-400 text-xs">Accepted format: .json</Text>
-        </View>
-      </View>
-
-      {/* Footer */}
-      <Text className="mt-8 text-gray-400 text-sm">
-        © 2026 GPosVan. All rights reserved.
-      </Text>
-
-      {/* Paste JSON Modal */}
-      <Modal
-        visible={pasteModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setPasteModalVisible(false)}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          className="flex-1">
-          <View className="flex-1 justify-center items-center bg-black/50 px-6">
-            <View className="w-full max-w-lg bg-white rounded-2xl shadow-2xl p-6">
-              {/* Modal Header */}
-              <View className="flex-row justify-between items-center mb-4">
-                <Text className="text-xl font-bold text-gray-800">
-                  Paste JSON Configuration
-                </Text>
-                <TouchableOpacity
-                  onPress={() => setPasteModalVisible(false)}
-                  className="w-8 h-8 rounded-full bg-gray-100 items-center justify-center">
-                  <Text className="text-gray-500 font-bold text-lg">✕</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Paste Error */}
-              {pasteError && (
-                <View className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4">
-                  <Text className="text-red-600 text-center font-medium text-sm">
-                    {pasteError}
-                  </Text>
-                </View>
-              )}
-
-              {/* Text Input */}
-              <ScrollView className="max-h-80">
-                <TextInput
-                  className="w-full bg-gray-50 border border-gray-200 rounded-xl p-4 text-gray-800 text-sm"
-                  placeholder='Paste your JSON configuration here...'
-                  placeholderTextColor="#9ca3af"
-                  value={pastedJson}
-                  onChangeText={setPastedJson}
-                  multiline
-                  numberOfLines={12}
-                  textAlignVertical="top"
-                  style={{ minHeight: 200 }}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                />
-              </ScrollView>
-
-              {/* Modal Actions */}
-              <View className="flex-row mt-4 gap-3">
-                <TouchableOpacity
-                  onPress={() => setPasteModalVisible(false)}
-                  className="flex-1 py-3 rounded-xl items-center justify-center border border-gray-200 bg-gray-50">
-                  <Text className="text-gray-600 font-semibold">Cancel</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={handlePasteSubmit}
-                  disabled={pasteLoading}
-                  className={`flex-1 py-3 rounded-xl items-center justify-center ${pasteLoading ? 'bg-green-400' : 'bg-green-500'
-                    }`}>
-                  {pasteLoading ? (
-                    <ActivityIndicator color="white" />
-                  ) : (
-                    <Text className="text-white font-semibold">Submit</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      className="flex-1 bg-gradient-to-br from-gray-50 to-gray-100"
+    >
+      <ScrollView
+        contentContainerClassName="items-center px-6 py-10"
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Setup Card */}
+        <View className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
+          {/* Header */}
+          <View className="items-center mb-6">
+            <View className="w-16 h-16 bg-green-500 rounded-2xl items-center justify-center mb-4 shadow-lg">
+              <Text className="text-3xl text-white font-bold">G</Text>
             </View>
+            <Text className="text-2xl font-bold text-gray-800">GPos Van</Text>
+            <Text className="text-gray-500 mt-1">Initial Setup</Text>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
-    </View>
+
+          {/* Description */}
+          <View className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6">
+            <Text className="text-blue-700 text-center text-sm leading-5">
+              Welcome! Fill in your API credentials below to configure the
+              application.
+            </Text>
+          </View>
+
+          {/* Submit Error */}
+          {submitStatus === 'error' && submitError && (
+            <View className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
+              <Text className="text-red-600 text-center font-medium text-sm">
+                {submitError}
+              </Text>
+            </View>
+          )}
+
+          {/* Success */}
+          {submitStatus === 'success' && (
+            <View className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6">
+              <Text className="text-green-600 text-center font-medium text-sm">
+                ✓ Credentials saved successfully! Redirecting…
+              </Text>
+            </View>
+          )}
+
+          {/* Form Fields */}
+          {FIELDS.map((field) => (
+            <View key={field.name} className="mb-4">
+              <Text className="text-gray-700 font-semibold text-sm mb-1.5">
+                {field.label} <Text className="text-red-500">*</Text>
+              </Text>
+              <Controller
+                control={control}
+                name={field.name}
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    className={`w-full bg-gray-50 border rounded-xl px-4 py-3 text-gray-800 text-sm ${errors[field.name]
+                      ? 'border-red-400'
+                      : 'border-gray-200'
+                      }`}
+                    placeholder={field.placeholder}
+                    placeholderTextColor="#9ca3af"
+                    value={value}
+                    onChangeText={onChange}
+                    onBlur={onBlur}
+                    secureTextEntry={field.secureTextEntry}
+                    autoCapitalize={field.autoCapitalize ?? 'none'}
+                    autoCorrect={false}
+                    keyboardType={field.keyboardType ?? 'default'}
+                    editable={submitStatus !== 'success'}
+                  />
+                )}
+              />
+              {errors[field.name] && (
+                <Text className="text-red-500 text-xs mt-1">
+                  {errors[field.name]?.message}
+                </Text>
+              )}
+            </View>
+          ))}
+
+          {/* Submit Button */}
+          <TouchableOpacity
+            onPress={handleSubmit(onSubmit)}
+            disabled={submitStatus === 'loading' || submitStatus === 'success'}
+            className={`w-full py-4 rounded-xl items-center justify-center shadow-lg mt-2 ${submitStatus === 'loading' || submitStatus === 'success'
+              ? 'bg-green-400'
+              : 'bg-green-500'
+              }`}
+          >
+            {submitStatus === 'loading' ? (
+              <ActivityIndicator color="white" />
+            ) : (
+              <Text className="text-white font-bold text-lg">
+                {submitStatus === 'error'
+                  ? 'Try Again'
+                  : 'Save Configuration'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {/* Footer */}
+        <Text className="mt-8 text-gray-400 text-sm">
+          © 2026 GPosVan. All rights reserved.
+        </Text>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
