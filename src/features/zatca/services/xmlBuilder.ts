@@ -382,37 +382,73 @@ function buildAccountingCustomerParty(
   );
 }
 
-function buildDeliveryAndPayment(invoiceDate: Date): string {
+function buildDeliveryAndPayment(invoiceDate: Date, isCreditNote: boolean): string {
+  let paymentMeans =
+    `\n  <cac:PaymentMeans>` +
+    `\n    <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>`;
+
+  if (isCreditNote) {
+    paymentMeans += `\n    <cbc:InstructionNote>Cancellation or Returned</cbc:InstructionNote>`;
+  }
+
+  paymentMeans += `\n  </cac:PaymentMeans>`;
+
   return (
     `\n  <cac:Delivery>` +
     `\n    <cbc:ActualDeliveryDate>${formatDate(invoiceDate)}</cbc:ActualDeliveryDate>` +
     `\n  </cac:Delivery>` +
-    `\n  <cac:PaymentMeans>` +
-    `\n    <cbc:PaymentMeansCode>30</cbc:PaymentMeansCode>` +
-    `\n  </cac:PaymentMeans>`
+    paymentMeans
   );
 }
 
-function buildAllowanceCharges(subtotals: InvoiceTaxSubtotal[]): string {
-  return subtotals
-    .filter((subtotal) => subtotal.discountAmount > 0)
-    .map(
-      (subtotal) =>
-        `\n  <cac:AllowanceCharge>` +
-        `\n    <cbc:ChargeIndicator>false</cbc:ChargeIndicator>` +
-        `\n    <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>` +
-        `\n    <cbc:AllowanceChargeReason>Loyalty Discount</cbc:AllowanceChargeReason>` +
-        `\n    <cbc:Amount currencyID="SAR">${fmt(subtotal.discountAmount)}</cbc:Amount>` +
-        `\n    <cac:TaxCategory>` +
-        `\n      <cbc:ID>${subtotal.taxCategoryId}</cbc:ID>` +
-        `\n      <cbc:Percent>${fmt(subtotal.taxPercent)}</cbc:Percent>` +
-        `\n      <cac:TaxScheme>` +
-        `\n        <cbc:ID>VAT</cbc:ID>` +
-        `\n      </cac:TaxScheme>` +
-        `\n    </cac:TaxCategory>` +
-        `\n  </cac:AllowanceCharge>`,
-    )
-    .join('');
+function buildAllowanceCharges(subtotals: InvoiceTaxSubtotal[], isCreditNote: boolean): string {
+  const hasDiscount = subtotals.some((s) => s.discountAmount > 0);
+
+  if (hasDiscount) {
+    return subtotals
+      .filter((subtotal) => subtotal.discountAmount > 0)
+      .map(
+        (subtotal) =>
+          `\n  <cac:AllowanceCharge>` +
+          `\n    <cbc:ChargeIndicator>false</cbc:ChargeIndicator>` +
+          `\n    <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>` +
+          `\n    <cbc:AllowanceChargeReason>Loyalty Discount</cbc:AllowanceChargeReason>` +
+          `\n    <cbc:Amount currencyID="SAR">${fmt(subtotal.discountAmount)}</cbc:Amount>` +
+          `\n    <cac:TaxCategory>` +
+          `\n      <cbc:ID>${subtotal.taxCategoryId}</cbc:ID>` +
+          `\n      <cbc:Percent>${fmt(subtotal.taxPercent)}</cbc:Percent>` +
+          `\n      <cac:TaxScheme>` +
+          `\n        <cbc:ID>VAT</cbc:ID>` +
+          `\n      </cac:TaxScheme>` +
+          `\n    </cac:TaxCategory>` +
+          `\n  </cac:AllowanceCharge>`,
+      )
+      .join('');
+  }
+
+  // Credit notes must always include AllowanceCharge (even with 0.00 amount)
+  if (isCreditNote) {
+    return subtotals
+      .map(
+        (subtotal) =>
+          `\n  <cac:AllowanceCharge>` +
+          `\n    <cbc:ChargeIndicator>false</cbc:ChargeIndicator>` +
+          `\n    <cbc:AllowanceChargeReasonCode>95</cbc:AllowanceChargeReasonCode>` +
+          `\n    <cbc:AllowanceChargeReason>Discount</cbc:AllowanceChargeReason>` +
+          `\n    <cbc:Amount currencyID="SAR">0.00</cbc:Amount>` +
+          `\n    <cac:TaxCategory>` +
+          `\n      <cbc:ID>${subtotal.taxCategoryId}</cbc:ID>` +
+          `\n      <cbc:Percent>${fmt(subtotal.taxPercent)}</cbc:Percent>` +
+          `\n      <cac:TaxScheme>` +
+          `\n        <cbc:ID>VAT</cbc:ID>` +
+          `\n      </cac:TaxScheme>` +
+          `\n    </cac:TaxCategory>` +
+          `\n  </cac:AllowanceCharge>`,
+      )
+      .join('');
+  }
+
+  return '';
 }
 
 function buildTaxTotals(totalTax: number, subtotals: InvoiceTaxSubtotal[]): string {
@@ -581,6 +617,22 @@ export function buildSignedPropertiesObject(
   );
 }
 
+// --- Billing Reference (Credit Notes) ---
+
+/**
+ * Build the BillingReference element for credit notes (type 381).
+ * Links the credit note back to the original invoice being returned against.
+ */
+function buildBillingReference(originalInvoiceId: string): string {
+  return (
+    `\n  <cac:BillingReference>` +
+    `\n    <cac:InvoiceDocumentReference>` +
+    `\n      <cbc:ID>${escapeXml(originalInvoiceId)}</cbc:ID>` +
+    `\n    </cac:InvoiceDocumentReference>` +
+    `\n  </cac:BillingReference>`
+  );
+}
+
 // --- Main XML Builder ---
 
 export interface BuildInvoiceXmlParams {
@@ -596,6 +648,8 @@ export interface BuildInvoiceXmlParams {
   totalExcludeTax: number;
   discount: number;
   config: ZatcaConfig;
+  billingReference?: string; // original invoice ID for credit notes (type 381)
+  creditNoteReason?: string; // KSA-10: reason for credit/debit note (required for type 381)
 }
 
 /**
@@ -613,6 +667,8 @@ export function buildBaseInvoiceXml(params: BuildInvoiceXmlParams): string {
     cartItems,
     discount,
     config,
+    billingReference,
+    creditNoteReason,
   } = params;
   const breakdown = calculateInvoiceTaxBreakdown(cartItems, config.isTaxIncludedInPrice, discount);
 
@@ -624,12 +680,17 @@ export function buildBaseInvoiceXml(params: BuildInvoiceXmlParams): string {
   let xml = `<?xml version="1.0" encoding="UTF-8"?>`;
   xml += `\n<Invoice xmlns="${xmlns}" xmlns:cac="${xmlns_cac}" xmlns:cbc="${xmlns_cbc}" xmlns:ext="${xmlns_ext}">`;
   xml += buildBaseXmlTags(invoiceNumber, invoiceDate, uuid, invoiceTypeCode, invoiceSubType);
+  // BillingReference: required for credit notes (type 381) to link back to original invoice
+  if (billingReference) {
+    xml += buildBillingReference(billingReference);
+  }
   xml += buildAdditionalReferenceTags(invoiceNumber, previousInvoiceHash);
   xml += buildQRTag();
   xml += buildAccountingSupplierParty(config);
   xml += buildAccountingCustomerParty(customer, invoiceSubType);
-  xml += buildDeliveryAndPayment(invoiceDate);
-  xml += buildAllowanceCharges(breakdown.subtotals);
+  const isCreditNote = invoiceTypeCode === '381';
+  xml += buildDeliveryAndPayment(invoiceDate, isCreditNote);
+  xml += buildAllowanceCharges(breakdown.subtotals, isCreditNote);
   xml += buildTaxTotals(breakdown.totalTaxAmount, breakdown.subtotals);
   xml += buildLegalMonetaryTotal(
     breakdown.totalExclusiveAmount,

@@ -215,17 +215,16 @@ export const buildPaymentReconciliation = (params: {
 
 /**
  * Build the details JSON string for the closing shift API.
- * Return-related fields are hardcoded to 0 (no return feature yet).
  */
 export const buildShiftDetails = (details: ShiftInvoiceDetails): string => {
   return JSON.stringify({
     number_of_invoices: details.number_of_invoices,
-    number_of_return_invoices: 0,
+    number_of_return_invoices: details.number_of_return_invoices,
     total_of_invoices: details.total_of_invoices,
-    total_of_returns: 0,
+    total_of_returns: details.total_of_returns,
     total_of_cash: details.total_of_cash,
-    total_of_return_cash: 0,
+    total_of_return_cash: details.total_of_return_cash,
     total_of_bank: details.total_of_bank,
-    total_of_return_bank: 0,
+    total_of_return_bank: details.total_of_return_bank,
   });
 };
