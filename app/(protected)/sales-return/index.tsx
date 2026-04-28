@@ -61,7 +61,9 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   ScrollView,
   Text,
   TextInput,
@@ -403,9 +405,12 @@ export default function SalesReturnPage() {
   const isProcessing = status === 'saving';
 
   return (
-    <View className="flex-1 flex-row bg-gray-50">
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      className="flex-1 flex-row bg-gray-50"
+    >
       {/* ─── Left Column: Search + Items ─── */}
-      <ScrollView className="flex-1 p-6">
+      <ScrollView className="flex-1 p-6" contentContainerStyle={{ paddingBottom: 120 }}>
         <Text className="text-2xl font-bold text-gray-800 mb-6">Sales Return</Text>
 
         {/* Search Bar */}
@@ -737,6 +742,6 @@ export default function SalesReturnPage() {
           </View>
         </View>
       </Modal>
-    </View>
+    </KeyboardAvoidingView>
   );
 }

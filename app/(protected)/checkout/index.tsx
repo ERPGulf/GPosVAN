@@ -48,7 +48,7 @@ import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
-import { Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 type PaymentMethod = 'Cash/Card' | 'Cash' | 'Card';
 
@@ -303,9 +303,12 @@ export default function CheckoutPage() {
   };
 
   return (
-    <View className="flex-1 flex-row bg-gray-50 ">
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      className="flex-1 flex-row bg-gray-50"
+    >
       {/* Left Column: Actions */}
-      <ScrollView className="flex-1 p-6">
+      <ScrollView className="flex-1 p-6" contentContainerStyle={{ paddingBottom: 120 }}>
         <View>
           <Text className="text-2xl font-bold text-gray-800 mb-6">Checkout</Text>
 
@@ -786,7 +789,7 @@ export default function CheckoutPage() {
           </View>
         </View>
       </Modal>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
