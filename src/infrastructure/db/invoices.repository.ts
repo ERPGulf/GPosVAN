@@ -36,7 +36,7 @@ export async function getNextInvoiceNo(db: ExpoSQLiteDatabase): Promise<string> 
   const seq = row[0]?.sequence ?? 1;
   const dateStr = formatYear(new Date());
   const paddedSeq = String(seq).padStart(6, '0');
-  return `IBM-${dateStr}-${paddedSeq}`;
+  return `${prefix}-${dateStr}-${paddedSeq}`;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
