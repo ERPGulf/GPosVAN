@@ -40,7 +40,7 @@ const expoDb = openDatabaseSync('van_pos.db', { enableChangeListener: true });
 const db = drizzle(expoDb);
 
 // ─── Sync status types ────────────────────────────────────────────────
-type SyncKey = 'products' | 'customers' | 'users' | 'shiftsAndInvoices';
+type SyncKey = 'products' | 'customers' | 'users' | 'shiftsAndInvoices' | 'salesReturns';
 type SyncStatus = 'idle' | 'syncing' | 'success' | 'error';
 
 // ─── Sync Button ──────────────────────────────────────────────────────
@@ -124,6 +124,7 @@ export default function SettingsPage() {
         customers: 'idle',
         users: 'idle',
         shiftsAndInvoices: 'idle',
+        salesReturns: 'idle',
     });
     const { sync: syncUsersFromApi } = useSyncUsers();
 
@@ -296,15 +297,55 @@ export default function SettingsPage() {
         }
     }, [user, appConfig, currentShiftLocalId, dispatch]);
 
+    const handleSyncSalesReturns = useCallback(async () => {
+        if (!(await checkInternet())) return;
+        updateSyncStatus('salesReturns', 'syncing');
+        try {
+            const posProfile = user?.posProfile?.[0] || '';
+            const machineName = await getMachineName() || 'UNKNOWN';
+            const userId = user?.id || '';
+
+            // Use the Redux shiftOpeningId if available, otherwise empty string
+            const shiftOpeningId = '';
+
+            // Sync pending (unsynced, non-errored) sales returns
+            console.log('[Settings] Syncing pending sales returns...');
+            const pendingCount = await pushPendingSalesReturns(db, {
+                posProfile,
+                shiftOpeningId,
+                machineName,
+            });
+            console.log(`[Settings] Pending sales returns synced: ${pendingCount}`);
+
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+
+            // Sync errored sales returns
+            console.log('[Settings] Syncing errored sales returns...');
+            const erroredCount = await pushErroredSalesReturns(db, {
+                posProfile,
+                shiftOpeningId,
+                machineName,
+                userId,
+            });
+            console.log(`[Settings] Errored sales returns synced: ${erroredCount}`);
+
+            updateSyncStatus('salesReturns', 'success');
+        } catch (err) {
+            console.error('[Settings] Sales returns sync failed:', err);
+            updateSyncStatus('salesReturns', 'error');
+        }
+    }, [user]);
+
     const isSyncingAny =
         syncStatus.products === 'syncing' ||
         syncStatus.customers === 'syncing' ||
         syncStatus.users === 'syncing' ||
-        syncStatus.shiftsAndInvoices === 'syncing';
+        syncStatus.shiftsAndInvoices === 'syncing' ||
+        syncStatus.salesReturns === 'syncing';
 
     const handleSyncAll = useCallback(async () => {
-        await Promise.all([handleSyncProducts(), handleSyncCustomers(), handleSyncUsers(), handleSyncShiftsAndInvoices()]);
-    }, [handleSyncProducts, handleSyncCustomers, handleSyncUsers, handleSyncShiftsAndInvoices]);
+        await Promise.all([handleSyncProducts(), handleSyncCustomers(), handleSyncUsers(), handleSyncShiftsAndInvoices(), handleSyncSalesReturns()]);
+    }, [handleSyncProducts, handleSyncCustomers, handleSyncUsers, handleSyncShiftsAndInvoices, handleSyncSalesReturns]);
 
     // ── Refresh POS Settings handler ─────────────────────────────────
     const handleRefreshPosSettings = useCallback(async () => {
@@ -431,6 +472,12 @@ export default function SettingsPage() {
                             label="Shifts & Invoices"
                             status={syncStatus.shiftsAndInvoices}
                             onPress={handleSyncShiftsAndInvoices}
+                        />
+                        <SyncButton
+                            icon="return-down-back-outline"
+                            label="Sales Returns"
+                            status={syncStatus.salesReturns}
+                            onPress={handleSyncSalesReturns}
                         />
 
                         {/* Sync All */}
