@@ -176,6 +176,16 @@ export default function SalesReturnPage() {
       const invoiceNo = await getNextInvoiceNo(db);
       const returnInvoiceNo = `${invoiceNo}-RET`;
       const invoiceUUID = randomUUID();
+      const zatcaInvoiceNumber = String(Date.now());
+
+      const normalizedCustomerId = (originalInvoice.customerId ?? '').trim().toUpperCase();
+      const isWalkInCustomer =
+        normalizedCustomerId === '' ||
+        normalizedCustomerId === 'WALK_IN' ||
+        normalizedCustomerId === 'WALK IN';
+      const invoiceSubType: InvoiceParams['invoiceSubType'] = isWalkInCustomer
+        ? '0200000'
+        : '0100000';
 
       // 4. Build return items for DB (negative quantities)
       const dbItems = returnItems.map((item) => ({
@@ -226,11 +236,11 @@ export default function SalesReturnPage() {
         totalExcludeTax: refundAmount,
         invoiceDate: new Date(),
         previousInvoiceHash,
-        invoiceNumber: returnInvoiceNo.replace(/[^0-9]/g, ''),
+        invoiceNumber: zatcaInvoiceNumber,
         discount: 0,
         invoiceTypeCode: '381', // Credit Note
-        invoiceSubType: '0200000', // Simplified
-        billingReference: originalInvoice.invoiceId ?? undefined,
+        invoiceSubType,
+        billingReference: originalInvoice.invoiceId ?? originalInvoice.id ?? undefined,
         // creditNoteReason, // KSA-10: required for ZATCA BR-KSA-17
       };
 
