@@ -15,6 +15,18 @@ export function generateInvoiceHash(xmlString: string): { hex: string; base64: s
   });
   const canonicalXml = ZatcaCrypto.removeTagsAndCanonicalize(xmlString);
   const hash = ZatcaCrypto.sha256Hash(canonicalXml);
+
+  // DEBUG: Log canonical XML for credit notes to diagnose hash mismatch
+  const isCreditNote = xmlString.includes('>381</');
+  if (isCreditNote) {
+    zatcaLogger.info('CREDIT NOTE DEBUG: Canonical XML after tag removal', {
+      canonicalXmlLength: canonicalXml.length,
+      canonicalXmlFull: canonicalXml.length < 5000 ? canonicalXml : canonicalXml.substring(0, 5000),
+      hashHex: hash.hex,
+      hashBase64: hash.base64,
+    });
+  }
+
   zatcaLogger.debug('Invoice hash generated', {
     canonicalXmlLength: canonicalXml.length,
     hashBase64Length: hash.base64.length,

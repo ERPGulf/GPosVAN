@@ -1,19 +1,19 @@
-import { selectUser } from '@/src/features/auth/authSlice';
 import { selectAppConfig } from '@/src/features/app/appConfigSlice';
+import { selectUser } from '@/src/features/auth/authSlice';
 import {
   addReturnItem,
   removeReturnItem,
   resetSalesReturn,
   selectCanSubmit,
+  selectMobile,
   selectOriginalInvoice,
+  selectReason,
   selectRefundAmount,
   selectReturnItems,
   selectSalesReturnError,
   selectSalesReturnStatus,
   selectSearchTerm,
   selectSplitItems,
-  selectReason,
-  selectMobile,
   setDone,
   setError,
   setInvoiceFound,
@@ -25,7 +25,11 @@ import {
   setSearchTerm,
   updateReturnQty,
 } from '@/src/features/sales-return/salesReturnSlice';
-import { selectShiftLocalId, selectShiftOpeningId, selectIsShiftOpen } from '@/src/features/shifts/shiftSlice';
+import {
+  formatDateTimeForApi,
+  syncSalesReturnToServer,
+} from '@/src/features/sales-return/services/salesReturnApi.service';
+import { selectIsShiftOpen, selectShiftLocalId, selectShiftOpeningId } from '@/src/features/shifts/shiftSlice';
 import { InvoiceQR } from '@/src/features/zatca/components/InvoiceQR';
 import { useCreateInvoice } from '@/src/features/zatca/hooks/useCreateInvoice';
 import { saveInvoiceFiles } from '@/src/features/zatca/services/invoiceFileStorage';
@@ -36,17 +40,13 @@ import {
 } from '@/src/features/zatca/services/zatcaConfig';
 import { getZatcaPayloadFromSecureStore } from '@/src/features/zatca/services/zatcaTestPayload';
 import type { InvoiceParams } from '@/src/features/zatca/types';
+import { getNextInvoiceNo } from '@/src/infrastructure/db/invoices.repository';
 import {
   getEffectiveRate,
   lookupInvoice,
   saveSalesReturn,
   updateSalesReturnFiles,
 } from '@/src/infrastructure/db/salesReturn.repository';
-import {
-  syncSalesReturnToServer,
-  formatDateTimeForApi,
-} from '@/src/features/sales-return/services/salesReturnApi.service';
-import { getNextInvoiceNo } from '@/src/infrastructure/db/invoices.repository';
 import { getMachineName } from '@/src/services/credentialStore';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
@@ -55,6 +55,7 @@ import { drizzle } from 'drizzle-orm/expo-sqlite';
 import { randomUUID } from 'expo-crypto';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
+import * as Sharing from 'expo-sharing';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useState } from 'react';
 import {
@@ -174,6 +175,7 @@ export default function SalesReturnPage() {
       // 3. Generate return invoice number
       const invoiceNo = await getNextInvoiceNo(db);
       const returnInvoiceNo = `${invoiceNo}-RET`;
+      const invoiceUUID = randomUUID();
 
       // 4. Build return items for DB (negative quantities)
       const dbItems = returnItems.map((item) => ({
@@ -189,20 +191,7 @@ export default function SalesReturnPage() {
         maxQty: item.maxQty,
       }));
 
-      // 5. Save to local DB
-      const returnId = await saveSalesReturn(db, {
-        customerId: originalInvoice.customerId,
-        invoiceId: originalInvoice.invoiceId, // return_against (server-side ID)
-        invoiceNumber: returnInvoiceNo,
-        pih: previousInvoiceHash,
-        reason: `${reason} Mobile:${mobile}`,
-        shiftId: shiftLocalId ?? null,
-        userId: user?.id ?? null,
-        posProfile: selectedPosProfile ?? null,
-        items: dbItems,
-      });
-
-      // 6. Build cart items for ZATCA XML (with effective rates for credited amounts)
+      // 5. Build cart items for ZATCA XML (with effective rates for credited amounts)
       const cartItemsForZatca = returnItems.map((item) => ({
         product: {
           itemCode: item.itemCode,
@@ -217,16 +206,23 @@ export default function SalesReturnPage() {
         promotion: null,
       }));
 
-      // 7. Generate ZATCA Credit Note XML (type 381)
+      const tax = cartItemsForZatca.reduce((sum, item) => {
+        const rate = item.product.uomPrice ?? item.product.price ?? 0;
+        const pct = item.product.taxPercentage ?? 15;
+        return sum + (rate * item.quantity * pct) / 100;
+      }, 0);
+
+      // 6. Generate ZATCA Credit Note XML (type 381)
+      // const creditNoteReason = `${reason} Mobile:${mobile}`;
       const invoiceParams: InvoiceParams = {
-        invoiceUUID: returnId,
+        invoiceUUID,
         customer: {
           id: originalInvoice.customerId,
           name: originalInvoice.customerId,
           phoneNo: mobile,
         },
         cartItems: cartItemsForZatca as any,
-        tax: 0, // calculated by xmlBuilder
+        tax,
         totalExcludeTax: refundAmount,
         invoiceDate: new Date(),
         previousInvoiceHash,
@@ -235,6 +231,7 @@ export default function SalesReturnPage() {
         invoiceTypeCode: '381', // Credit Note
         invoiceSubType: '0200000', // Simplified
         billingReference: originalInvoice.invoiceId ?? undefined,
+        // creditNoteReason, // KSA-10: required for ZATCA BR-KSA-17
       };
 
       const invoiceResult = createZatcaInvoice(invoiceParams, zatcaConfig);
@@ -243,11 +240,27 @@ export default function SalesReturnPage() {
         return;
       }
 
-      // 8. Save PIH for next invoice
+      // 7. Save PIH for next invoice
       await AsyncStorage.setItem(PIH_STORAGE_KEY, invoiceResult.invoiceHash);
+      await AsyncStorage.setItem('@zatca_last_invoice_xml', invoiceResult.xml);
+      await AsyncStorage.setItem('@zatca_last_qr_data', invoiceResult.qrData);
 
-      // 9. Save XML and QR files
-      setGeneratedReturn({ returnId, ...invoiceResult });
+      // 8. Save to local DB
+      const returnId = await saveSalesReturn(db, {
+        returnId: invoiceUUID,
+        customerId: originalInvoice.customerId,
+        invoiceId: originalInvoice.invoiceId, // return_against (server-side ID)
+        invoiceNumber: returnInvoiceNo,
+        pih: previousInvoiceHash,
+        reason: `${reason} Mobile:${mobile}`,
+        shiftId: shiftLocalId ?? null,
+        userId: user?.id ?? null,
+        posProfile: selectedPosProfile ?? null,
+        items: dbItems,
+      });
+
+      // 9. Display modal
+      setGeneratedReturn({ returnId: invoiceUUID, ...invoiceResult });
       setIsReturnModalVisible(true);
       dispatch(setDone());
     } catch (err: any) {
@@ -345,6 +358,36 @@ export default function SalesReturnPage() {
     router.replace('/');
   };
 
+  const handleShareXml = async () => {
+    if (!generatedReturn?.xml) {
+      Alert.alert('No XML', 'No XML available to share yet.');
+      return;
+    }
+
+    const isSharingAvailable = await Sharing.isAvailableAsync();
+    if (!isSharingAvailable) {
+      Alert.alert('Unavailable', 'Sharing is not available on this device.');
+      return;
+    }
+
+    const baseDir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+    if (!baseDir) {
+      Alert.alert('Error', 'Cannot access local storage to prepare XML file.');
+      return;
+    }
+
+    const fileUri = `${baseDir}credit-note-${Date.now()}.xml`;
+    await FileSystem.writeAsStringAsync(fileUri, generatedReturn.xml, {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+
+    await Sharing.shareAsync(fileUri, {
+      mimeType: 'application/xml',
+      dialogTitle: 'Share ZATCA Credit Note XML',
+      UTI: 'public.xml',
+    });
+  };
+
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   const isProcessing = status === 'saving';
@@ -373,9 +416,8 @@ export default function SalesReturnPage() {
           <TouchableOpacity
             onPress={handleSearch}
             disabled={!searchTerm.trim() || status === 'searching'}
-            className={`px-5 py-3 rounded-xl ${
-              searchTerm.trim() ? 'bg-blue-500' : 'bg-gray-300'
-            }`}>
+            className={`px-5 py-3 rounded-xl ${searchTerm.trim() ? 'bg-blue-500' : 'bg-gray-300'
+              }`}>
             {status === 'searching' ? (
               <ActivityIndicator size="small" color="white" />
             ) : (
@@ -441,9 +483,8 @@ export default function SalesReturnPage() {
               return (
                 <View
                   key={`${item.itemCode}-${index}`}
-                  className={`flex-row items-center justify-between p-4 mb-2 rounded-xl border ${
-                    isAdded ? 'bg-orange-50 border-orange-200' : 'bg-white border-gray-100'
-                  }`}>
+                  className={`flex-row items-center justify-between p-4 mb-2 rounded-xl border ${isAdded ? 'bg-orange-50 border-orange-200' : 'bg-white border-gray-100'
+                    }`}>
                   <View className="flex-1 pr-3">
                     <Text className="text-sm font-medium text-gray-800" numberOfLines={1}>
                       {item.itemName || item.itemCode}
@@ -485,9 +526,8 @@ export default function SalesReturnPage() {
                   <TouchableOpacity
                     onPress={() => dispatch(addReturnItem(index))}
                     disabled={isAdded || isProcessing}
-                    className={`px-4 py-2 rounded-lg ${
-                      isAdded ? 'bg-gray-200' : 'bg-orange-500'
-                    }`}>
+                    className={`px-4 py-2 rounded-lg ${isAdded ? 'bg-gray-200' : 'bg-orange-500'
+                      }`}>
                     <Text className={`text-xs font-semibold ${isAdded ? 'text-gray-500' : 'text-white'}`}>
                       {isAdded ? 'Added' : 'Return'}
                     </Text>
@@ -629,9 +669,8 @@ export default function SalesReturnPage() {
           <TouchableOpacity
             onPress={handleProcessReturn}
             disabled={!canSubmit || isProcessing}
-            className={`py-3.5 rounded-xl items-center ${
-              canSubmit && !isProcessing ? 'bg-orange-500' : 'bg-gray-300'
-            }`}>
+            className={`py-3.5 rounded-xl items-center ${canSubmit && !isProcessing ? 'bg-orange-500' : 'bg-gray-300'
+              }`}>
             {isProcessing ? (
               <View className="flex-row items-center gap-2">
                 <ActivityIndicator size="small" color="white" />
@@ -671,11 +710,20 @@ export default function SalesReturnPage() {
               </View>
             )}
 
-            <TouchableOpacity
-              onPress={handleDoneReturnModal}
-              className="bg-green-500 py-3 px-10 rounded-xl w-full items-center">
-              <Text className="font-semibold text-white">Done</Text>
-            </TouchableOpacity>
+            <View className="flex-row gap-3 w-full">
+              <TouchableOpacity
+                onPress={handleShareXml}
+                className="flex-1 flex-row items-center justify-center bg-blue-500 py-3 rounded-xl gap-2">
+                <Ionicons name="share-outline" size={18} color="white" />
+                <Text className="font-semibold text-white">Share XML</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={handleDoneReturnModal}
+                className="flex-1 bg-green-500 py-3 rounded-xl items-center">
+                <Text className="font-semibold text-white">Done</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

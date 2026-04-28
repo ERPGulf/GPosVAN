@@ -49,6 +49,7 @@ export interface InvoiceParams {
   invoiceTypeCode: InvoiceTypeCode;
   invoiceSubType: InvoiceSubType;
   billingReference?: string; // original invoice ID for credit notes (type 381)
+  creditNoteReason?: string; // KSA-10: reason for credit/debit note (required for type 381)
 }
 
 export interface InvoiceResult {

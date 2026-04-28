@@ -11,6 +11,10 @@ import {
     pushErroredInvoices,
     pushPendingInvoices,
 } from '@/src/infrastructure/db/invoices.repository';
+import {
+    pushErroredSalesReturns,
+    pushPendingSalesReturns,
+} from '@/src/infrastructure/db/salesReturn.repository';
 import { syncAllProducts } from '@/src/infrastructure/db/products.repository';
 import {
     pushPendingCloseShifts,
@@ -257,8 +261,31 @@ export default function SettingsPage() {
 
             await new Promise((resolve) => setTimeout(resolve, 1000));
 
-            // Step 4: Sync close shifts
-            console.log('[Settings] Step 4: Syncing close shifts...');
+            // Step 4: Sync pending sales returns (isSynced=false, isError=false)
+            console.log('[Settings] Step 4: Syncing pending sales returns...');
+            const pendingReturns = await pushPendingSalesReturns(db, {
+                posProfile,
+                shiftOpeningId,
+                machineName,
+            });
+            console.log(`[Settings] Pending sales returns synced: ${pendingReturns}`);
+
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+
+            // Step 5: Sync errored sales returns (isError=true, isErrorSynced=false)
+            console.log('[Settings] Step 5: Syncing errored sales returns...');
+            const erroredReturns = await pushErroredSalesReturns(db, {
+                posProfile,
+                shiftOpeningId,
+                machineName,
+                userId,
+            });
+            console.log(`[Settings] Errored sales returns synced: ${erroredReturns}`);
+
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+
+            // Step 6: Sync close shifts
+            console.log('[Settings] Step 6: Syncing close shifts...');
             const closedShifts = await pushPendingCloseShifts(db, { company });
             console.log(`[Settings] Close shifts synced: ${closedShifts.length}`);
 

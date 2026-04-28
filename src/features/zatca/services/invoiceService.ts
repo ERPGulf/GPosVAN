@@ -267,6 +267,7 @@ export function createInvoice(params: InvoiceParams, config: ZatcaConfig): Invoi
       discount: params.discount,
       config,
       billingReference: params.billingReference,
+      creditNoteReason: params.creditNoteReason,
     });
 
     zatcaLogger.debug('Base XML generated', {

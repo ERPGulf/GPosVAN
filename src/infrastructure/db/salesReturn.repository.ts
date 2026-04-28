@@ -39,7 +39,7 @@ export interface OriginalInvoice {
   invoiceNo: string | null; // local number (e.g. INV-2026-000042)
   invoiceId: string | null; // server-side ID (e.g. ACC-SINV-2026-00043)
   customerId: string | null;
-  dateTime: Date;
+  dateTime: string; // ISO string for Redux serializability
 }
 
 export interface SaveSalesReturnParams {
@@ -63,6 +63,7 @@ export interface SaveSalesReturnParams {
     minQty: number;
     maxQty: number;
   }[];
+  returnId?: string;
 }
 
 // ─── Discount Utility ─────────────────────────────────────────────────────────
@@ -308,7 +309,7 @@ export async function lookupInvoice(
     invoiceNo: invoice.invoiceNo,
     invoiceId: invoice.invoiceId,
     customerId: invoice.customerId,
-    dateTime: invoice.dateTime,
+    dateTime: invoice.dateTime instanceof Date ? invoice.dateTime.toISOString() : String(invoice.dateTime),
   };
 
   const splitItems = splitInvoiceItemsByPromotion(items);
@@ -327,9 +328,11 @@ export async function saveSalesReturn(
   db: ExpoSQLiteDatabase,
   params: SaveSalesReturnParams,
 ): Promise<string> {
-  // Generate the UUID once so we can return it
-  const { randomUUID } = await import('expo-crypto');
-  const returnId = randomUUID();
+  let returnId = params.returnId;
+  if (!returnId) {
+    const { randomUUID } = await import('expo-crypto');
+    returnId = randomUUID();
+  }
 
   await db.transaction(async (tx) => {
     // 1. Insert SalesReturn header
