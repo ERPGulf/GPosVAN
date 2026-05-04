@@ -113,6 +113,25 @@ export default function CheckoutPage() {
   // Amount to be paid via Cash/Card after loyalty deduction
   const amountToPay = Math.max(0, total - loyaltyAmount);
 
+  // Auto-select the default POS customer (custom_default_pos === 1) when customers load
+  useEffect(() => {
+    if (!customers || customers.length === 0) return;
+    if (selectedCustomer) return; // Don't override a manual selection
+    const defaultCustomer = customers.find((c) => c.isDefault === true);
+    if (defaultCustomer) {
+      setSelectedCustomer({
+        id: defaultCustomer.id,
+        name: defaultCustomer.name,
+        phoneNo: defaultCustomer.phoneNo,
+        taxId: defaultCustomer.vatNumber,
+        registrationNo: defaultCustomer.customerRegistrationNo,
+        registrationType: defaultCustomer.customerRegistrationType,
+        addressLine1: defaultCustomer.addressLine1,
+        city: defaultCustomer.city,
+      });
+    }
+  }, [customers]);
+
   const filteredCustomers = useMemo(() => {
     if (!customers) return [];
     if (!customerSearch.trim()) return customers;
