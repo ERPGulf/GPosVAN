@@ -3,8 +3,8 @@ import {
   clearCart,
   removeFromCart,
   selectCartItems,
-  selectTotal,
   selectDiscount,
+  selectTotal,
   updateQuantityAsync,
 } from '@/src/features/cart/cartSlice';
 import { AddCustomerModal } from '@/src/features/customers/components/AddCustomerModal';
@@ -15,10 +15,13 @@ import {
   syncInvoiceToServer,
   syncUnclearedInvoiceToServer,
 } from '@/src/features/invoices/services/invoiceApi.service';
+import { LoyaltyLookupModal } from '@/src/features/loyalty/components/LoyaltyLookupModal';
+import { applyLoyalty, clearLoyalty, selectIsLoyaltyApplied, selectLoyaltyAmount, selectLoyaltyMobile, selectLoyaltyPoints } from '@/src/features/loyalty/loyaltySlice';
 import { CashAmountModal } from '@/src/features/orders/components/CashAmountModal';
 import { OrderSummary } from '@/src/features/orders/components/OrderSummary';
 import { selectShiftLocalId, selectShiftOpeningId } from '@/src/features/shifts/shiftSlice';
 
+import { selectAppConfig } from '@/src/features/app/appConfigSlice';
 import { InvoiceQR } from '@/src/features/zatca/components/InvoiceQR';
 import { useCreateInvoice } from '@/src/features/zatca/hooks/useCreateInvoice';
 import { saveInvoiceFiles } from '@/src/features/zatca/services/invoiceFileStorage';
@@ -36,7 +39,6 @@ import {
   markInvoiceSyncError,
   saveInvoiceToDb,
 } from '@/src/infrastructure/db/invoices.repository';
-import { selectAppConfig } from '@/src/features/app/appConfigSlice';
 import { getMachineName } from '@/src/services/credentialStore';
 import { logger } from '@/src/services/logger';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
@@ -99,6 +101,37 @@ export default function CheckoutPage() {
   const [customerSearch, setCustomerSearch] = useState('');
   const [generatedInvoice, setGeneratedInvoice] = useState<GeneratedInvoiceState | null>(null);
   const [isInvoiceModalVisible, setIsInvoiceModalVisible] = useState(false);
+  const [loyaltyCustomerName, setLoyaltyCustomerName] = useState('');
+  const [loyaltyCustomerMobile, setLoyaltyCustomerMobile] = useState('');
+  const [isLoyaltyModalVisible, setIsLoyaltyModalVisible] = useState(false);
+
+  // Loyalty state from Redux
+  const loyaltyAmount = useAppSelector(selectLoyaltyAmount);
+  const loyaltyPoints = useAppSelector(selectLoyaltyPoints);
+  const isLoyaltyApplied = useAppSelector(selectIsLoyaltyApplied);
+  const loyaltyMobile = useAppSelector(selectLoyaltyMobile);
+
+  // Amount to be paid via Cash/Card after loyalty deduction
+  const amountToPay = Math.max(0, total - loyaltyAmount);
+
+  // Auto-select the default POS customer (custom_default_pos === 1) when customers load
+  useEffect(() => {
+    if (!customers || customers.length === 0) return;
+    if (selectedCustomer) return; // Don't override a manual selection
+    const defaultCustomer = customers.find((c) => c.isDefault === true);
+    if (defaultCustomer) {
+      setSelectedCustomer({
+        id: defaultCustomer.id,
+        name: defaultCustomer.name,
+        phoneNo: defaultCustomer.phoneNo,
+        taxId: defaultCustomer.vatNumber,
+        registrationNo: defaultCustomer.customerRegistrationNo,
+        registrationType: defaultCustomer.customerRegistrationType,
+        addressLine1: defaultCustomer.addressLine1,
+        city: defaultCustomer.city,
+      });
+    }
+  }, [customers]);
 
   const filteredCustomers = useMemo(() => {
     if (!customers) return [];
@@ -113,10 +146,10 @@ export default function CheckoutPage() {
   useEffect(() => {
     if (selectedPaymentMethod === 'Cash/Card') {
       const cash = parseFloat(cashAmount) || 0;
-      const remaining = Math.max(0, total - cash);
+      const remaining = Math.max(0, amountToPay - cash);
       setCardAmount(remaining.toFixed(2));
     }
-  }, [cashAmount, total, selectedPaymentMethod]);
+  }, [cashAmount, amountToPay, selectedPaymentMethod]);
 
   // Reset split amounts when switching away from Cash/Card
   useEffect(() => {
@@ -125,9 +158,16 @@ export default function CheckoutPage() {
       setCardAmount('');
     } else {
       setCashAmount('');
-      setCardAmount(total.toFixed(2));
+      setCardAmount(amountToPay.toFixed(2));
     }
-  }, [selectedPaymentMethod, total]);
+  }, [selectedPaymentMethod, amountToPay]);
+
+  // Auto-populate loyalty customer mobile when loyalty is applied
+  useEffect(() => {
+    if (isLoyaltyApplied && loyaltyMobile) {
+      setLoyaltyCustomerMobile(loyaltyMobile);
+    }
+  }, [isLoyaltyApplied, loyaltyMobile]);
 
   const handleSelectCustomer = (customer: SelectedCustomer) => {
     setSelectedCustomer(customer);
@@ -212,7 +252,7 @@ export default function CheckoutPage() {
         invoiceDate: new Date(),
         previousInvoiceHash,
         invoiceNumber: String(Date.now()),
-        discount: totalDiscount,
+        discount: totalDiscount + loyaltyAmount,
         invoiceTypeCode: '388',
         // Basic routing: selected customer => standard invoice, otherwise simplified.
         invoiceSubType: selectedCustomer ? '0100000' : '0200000',
@@ -240,12 +280,15 @@ export default function CheckoutPage() {
         userId: user?.id ?? null,
         posProfile: selectedPosProfile ?? null,
         previousInvoiceHash: previousInvoiceHash,
-        discount: totalDiscount,
+        discount: totalDiscount + loyaltyAmount,
         cartItems,
         paymentMethod: selectedPaymentMethod,
         cashAmount: parseFloat(cashAmount) || 0,
         cardAmount: parseFloat(cardAmount) || 0,
         dateTime: invoiceDate,
+        loyaltyCustomerName: loyaltyCustomerName.trim() || undefined,
+        loyaltyCustomerMobile: loyaltyCustomerMobile.trim() || undefined,
+        loyaltyAmount: loyaltyAmount > 0 ? loyaltyAmount : undefined,
       });
 
       // Invoice UUID is stored in state so the QR PNG capture callback can save files
@@ -295,12 +338,18 @@ export default function CheckoutPage() {
     setIsInvoiceModalVisible(false);
     setGeneratedInvoice(null);
     dispatch(clearCart());
+    dispatch(clearLoyalty());
+    setLoyaltyCustomerName('');
+    setLoyaltyCustomerMobile('');
     router.replace('/');
   };
 
   const handleSaveAndClear = () => {
     console.log('Save and Clear');
     dispatch(clearCart());
+    dispatch(clearLoyalty());
+    setLoyaltyCustomerName('');
+    setLoyaltyCustomerMobile('');
     router.replace('/');
   };
 
@@ -312,7 +361,24 @@ export default function CheckoutPage() {
       {/* Left Column: Actions */}
       <ScrollView className="flex-1 p-6" contentContainerStyle={{ paddingBottom: 120 }}>
         <View>
-          <Text className="text-2xl font-bold text-gray-800 mb-6">Checkout</Text>
+          <View className="flex-row justify-between items-center mb-6">
+            <Text className="text-2xl font-bold text-gray-800">Checkout</Text>
+            {!isLoyaltyApplied && (
+              <TouchableOpacity
+                onPress={() => {
+                  if (!loyaltyCustomerMobile) {
+                    alert('Please enter a 10-digit mobile number in the Customer Details section first.');
+                    return;
+                  }
+                  setIsLoyaltyModalVisible(true);
+                }}
+                className="flex-row items-center bg-amber-100 px-4 py-2 rounded-lg"
+              >
+                <Ionicons name="gift-outline" size={20} color="#f59e0b" className="mr-2" />
+                <Text className="text-amber-700 font-bold ml-2">Loyalty points</Text>
+              </TouchableOpacity>
+            )}
+          </View>
 
           {/* Select Customer Section */}
           <View className="mb-8" style={{ zIndex: 10 }}>
@@ -384,9 +450,8 @@ export default function CheckoutPage() {
                             city: customer.city,
                           })
                         }
-                        className={`flex-row items-center px-4 py-3 border-b border-gray-50 ${
-                          selectedCustomer?.id === customer.id ? 'bg-green-50' : ''
-                        }`}>
+                        className={`flex-row items-center px-4 py-3 border-b border-gray-50 ${selectedCustomer?.id === customer.id ? 'bg-green-50' : ''
+                          }`}>
                         <View className="w-8 h-8 rounded-full bg-gray-100 items-center justify-center mr-3">
                           <Ionicons name="person-outline" size={16} color="#6b7280" />
                         </View>
@@ -421,6 +486,37 @@ export default function CheckoutPage() {
               </View>
             )}
           </View>
+
+          {/* Customer Details Section */}
+          <View className="mb-6">
+            <Text className="text-gray-600 font-medium mb-2">Customer Details</Text>
+            <View className="bg-white border border-gray-200 rounded-xl p-4 gap-3">
+              <View>
+                <Text className="text-gray-500 text-xs mb-1">Customer Name</Text>
+                <TextInput
+                  className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-gray-800"
+                  placeholder="Enter customer name"
+                  placeholderTextColor="#9ca3af"
+                  value={loyaltyCustomerName}
+                  onChangeText={setLoyaltyCustomerName}
+                />
+              </View>
+              <View>
+                <Text className="text-gray-500 text-xs mb-1">Customer Mobile</Text>
+                <TextInput
+                  className="bg-gray-50 border border-gray-200 rounded-lg p-3 text-gray-800"
+                  placeholder="Enter 10-digit mobile number"
+                  placeholderTextColor="#9ca3af"
+                  value={loyaltyCustomerMobile}
+                  onChangeText={(text) => setLoyaltyCustomerMobile(text.replace(/\D/g, '').slice(0, 10))}
+                  keyboardType="phone-pad"
+                  maxLength={10}
+                />
+              </View>
+            </View>
+          </View>
+
+          {/* Loyalty points button moved to top, modal rendered at the end */}
 
           {/* Payment Method Section */}
           <View>
@@ -498,8 +594,9 @@ export default function CheckoutPage() {
             cartItems={cartItems}
             onRemoveItem={(index) => dispatch(removeFromCart(index))}
             onUpdateQuantity={(index, delta) => dispatch(updateQuantityAsync({ index, delta }))}
-            onCheckout={() => {}}
+            onCheckout={() => { }}
             showActions={false}
+            loyaltyDiscount={loyaltyAmount}
           />
         </View>
 
@@ -545,6 +642,14 @@ export default function CheckoutPage() {
         onSubmit={(amount) => setCashAmount(amount)}
         totalAmount={total}
         initialAmount={cashAmount}
+      />
+      <LoyaltyLookupModal
+        visible={isLoyaltyModalVisible}
+        onClose={() => setIsLoyaltyModalVisible(false)}
+        onApply={(data) => dispatch(applyLoyalty(data))}
+        invoiceTotal={total}
+        initialMobileNo={loyaltyCustomerMobile}
+        autoFetch={true}
       />
 
       <Modal visible={isInvoiceModalVisible} animationType="fade" transparent>
@@ -625,6 +730,8 @@ export default function CheckoutPage() {
                               invoiceData.invoice.dateTime,
                             ),
                             posShift: shiftOpeningId,
+                            loyaltyCustomerMobile: invoiceData.invoice.loyalityCustomerMobile || undefined,
+                            loyaltyCustomerName: invoiceData.invoice.loyalityCustomerName || undefined,
                           });
 
                           // Update local DB with server invoice ID
@@ -819,9 +926,8 @@ function PaymentMethodOption({
   return (
     <TouchableOpacity
       onPress={onPress}
-      className={`flex-1 p-4 rounded-xl border ${
-        isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'
-      }`}>
+      className={`flex-1 p-4 rounded-xl border ${isSelected ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'
+        }`}>
       <View className="flex-row justify-between items-start mb-3">
         <View className={`w-12 h-12 rounded-full items-center justify-center ${bgIcon}`}>
           <Ionicons name={icon} size={24} color={color} />

@@ -57,6 +57,9 @@ export interface SaveInvoiceParams {
   cashAmount: number;
   cardAmount: number;
   dateTime: Date;
+  loyaltyCustomerName?: string;
+  loyaltyCustomerMobile?: string;
+  loyaltyAmount?: number;
 }
 
 // ─── Save invoice ─────────────────────────────────────────────────────────────
@@ -85,6 +88,8 @@ export async function saveInvoiceToDb(
       userId: params.userId,
       isError: false,
       isErrorSynced: false,
+      loyalityCustomerName: params.loyaltyCustomerName || null,
+      loyalityCustomerMobile: params.loyaltyCustomerMobile || null,
     });
 
     // 2. Insert InvoiceItems — SplitByPromotion
@@ -168,6 +173,7 @@ export async function saveInvoiceToDb(
 
     // 3. Insert InvoicePayments — split rows as needed
     const now = params.dateTime;
+    const loyaltyAmt = params.loyaltyAmount ?? 0;
 
     if (params.paymentMethod === 'Cash/Card') {
       if (params.cashAmount > 0) {
@@ -196,7 +202,18 @@ export async function saveInvoiceToDb(
 
       await tx.insert(invoicePayments).values({
         modeOfPayment: params.paymentMethod,
-        amount: totalAmount,
+        amount: totalAmount - loyaltyAmt,
+        invoiceEntityId: params.invoiceUUID,
+        userId: params.userId,
+        createAt: now,
+      });
+    }
+
+    // 4. Insert Loyalty payment entry (if applicable)
+    if (loyaltyAmt > 0) {
+      await tx.insert(invoicePayments).values({
+        modeOfPayment: 'Loyalty',
+        amount: loyaltyAmt,
         invoiceEntityId: params.invoiceUUID,
         userId: params.userId,
         createAt: now,
@@ -446,6 +463,8 @@ export async function pushPendingInvoices(
         offlineInvoiceNumber: invoiceData.invoice.invoiceNo || '',
         customOfflineCreationTime: formatDateTimeForApi(invoiceData.invoice.dateTime),
         posShift: params.shiftOpeningId,
+        loyaltyCustomerMobile: invoiceData.invoice.loyalityCustomerMobile || undefined,
+        loyaltyCustomerName: invoiceData.invoice.loyalityCustomerName || undefined,
       });
 
       await markInvoiceAsSynced(db, inv.id, serverId);

@@ -193,15 +193,20 @@ export const closeShift = async (
 
   let expectedCash = 0;
   let expectedCard = 0;
+  let loyaltyTotal = 0;
 
   for (const row of rows) {
     if (row.mode === 'Cash') {
       expectedCash = Number(row.total) || 0;
     } else if (row.mode === 'Card') {
       expectedCard = Number(row.total) || 0;
+    } else if (row.mode === 'Loyalty') {
+      loyaltyTotal = Number(row.total) || 0;
     }
   }
 
+  // Loyalty payments don't generate physical cash, so reduce expected cash
+  expectedCash = Math.max(0, expectedCash - loyaltyTotal);
   // Subtract sales return total from expected cash (returns are cash-only refunds)
   const salesReturnTotal = await getSalesReturnTotalForShift(db, params.shiftLocalId);
   expectedCash = expectedCash - salesReturnTotal;
@@ -213,6 +218,7 @@ export const closeShift = async (
       closingCard: params.closingCard,
       expectedCash,
       expectedCard,
+      loyaltyTotal,
       salesReturnTotal,
     });
   }
@@ -226,6 +232,7 @@ export const closeShift = async (
       closingExpectedCard: expectedCard,
       closingShiftDate: params.closingDate ?? new Date(),
       isShiftClosed: true,
+      claimedLoyalityAmount: loyaltyTotal,
       salesReturn: salesReturnTotal,
     })
     .where(eq(shifts.shiftLocalId, params.shiftLocalId));
@@ -264,16 +271,19 @@ export const getShiftInvoiceDetails = async (
 
   let totalCash = 0;
   let totalCard = 0;
+  let totalLoyalty = 0;
 
   for (const row of paymentRows) {
     if (row.mode === 'Cash') {
       totalCash = Number(row.total) || 0;
     } else if (row.mode === 'Card') {
       totalCard = Number(row.total) || 0;
+    } else if (row.mode === 'Loyalty') {
+      totalLoyalty = Number(row.total) || 0;
     }
   }
 
-  const totalOfInvoices = totalCash + totalCard;
+  const totalOfInvoices = totalCash + totalCard + totalLoyalty;
 
   // Query actual sales return data
   const numberOfReturnInvoices = await getSalesReturnCountForShift(db, shiftLocalId);
@@ -285,9 +295,10 @@ export const getShiftInvoiceDetails = async (
     total_of_invoices: totalOfInvoices,
     total_of_returns: totalOfReturns,
     total_of_cash: totalCash,
+    total_of_bank: totalCard, // Card maps to "bank" in the API
+    total_of_return_bank: 0,
+    total_loyalty_amount_claimed: totalLoyalty,
     total_of_return_cash: totalOfReturns, // all returns are cash-only for now
-    total_of_bank: totalCard,
-    total_of_return_bank: 0, // no card refunds yet
   };
 };
 
