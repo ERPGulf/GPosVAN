@@ -11,6 +11,7 @@ import {
 import type { ShiftInvoiceDetails } from '../../features/shifts/services/shiftApi.service';
 import { invoicePayments, invoices, shifts } from './schema';
 import { getMachineName } from '@/src/services/credentialStore';
+import { logger } from '@/src/services/logger';
 import { getSalesReturnCountForShift, getSalesReturnTotalForShift } from './salesReturn.repository';
 
 /**
@@ -157,6 +158,7 @@ export const pushPendingOpenShifts = async (
         `[ShiftsRepository] Failed to push shift ${shift.shiftLocalId}:`,
         error,
       );
+      logger.recordError(error, 'PushPendingOpenShift');
     }
   }
 
@@ -420,6 +422,7 @@ export const pushPendingCloseShifts = async (
         `[ShiftsRepository] Failed to push close shift ${shift.shiftLocalId}:`,
         error,
       );
+      logger.recordError(error, 'PushPendingCloseShift');
     }
   }
 

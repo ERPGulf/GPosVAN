@@ -1,4 +1,6 @@
 import type { CartItem } from '@/src/features/cart/types';
+import { getMachineName } from '@/src/services/credentialStore';
+import { logger } from '@/src/services/logger';
 import { store } from '@/src/store/store';
 import { and, eq, sql } from 'drizzle-orm';
 import { ExpoSQLiteDatabase } from 'drizzle-orm/expo-sqlite';
@@ -468,11 +470,13 @@ export async function pushPendingInvoices(
         }
       } else {
         console.error(`[InvoicesRepository] API error pushing invoice ${inv.invoiceNo}:`, error);
+        logger.recordError(error, 'PushPendingInvoice');
         // Mark as errored so it can be retried via the uncleared endpoint
         try {
           await markInvoiceSyncError(db, inv.id, error);
         } catch (dbErr) {
           console.error('[InvoicesRepository] Failed to save sync error:', dbErr);
+          logger.recordError(dbErr, 'PushPendingInvoice.saveError');
         }
       }
     }
@@ -576,7 +580,11 @@ export async function pushErroredInvoices(
         );
       }
     } catch (error) {
-      console.error(`[InvoicesRepository] Failed to push errored invoice ${inv.invoiceNo}:`, error);
+      console.error(
+        `[InvoicesRepository] Failed to push errored invoice ${inv.invoiceNo}:`,
+        error,
+      );
+      logger.recordError(error, 'PushErroredInvoice');
     }
   }
 

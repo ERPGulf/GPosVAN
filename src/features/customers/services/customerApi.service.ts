@@ -1,4 +1,5 @@
 import { apiClient } from '@/src/services/api/httpClient';
+import { logger } from '@/src/services/logger';
 import { AxiosError } from 'axios';
 import {
   CreateCustomerParams,
@@ -16,6 +17,7 @@ export const fetchCustomers = async (): Promise<GetCustomerListResponse> => {
     return response.data;
   } catch (error) {
     console.error('Error fetching customers:', error);
+    logger.recordError(error, 'FetchCustomers');
     throw error;
   }
 };
@@ -74,6 +76,7 @@ export const createCustomer = async (
     const errorMessage = getApiErrorMessage(error);
     console.error('[CreateCustomer] API error:', errorMessage);
     console.error('[CreateCustomer] Full error:', error);
+    logger.recordError(error, 'CreateCustomer');
     // Re-throw with a more descriptive error
     throw new Error(errorMessage);
   }

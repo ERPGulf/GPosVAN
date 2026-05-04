@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "399766743380",
+    "project_id": "van-pos-9b2e7",
+    "storage_bucket": "van-pos-9b2e7.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:399766743380:android:cce82021bb733e22d040c1",
+        "android_client_info": {
+          "package_name": "com.bazim.Vanpos"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDdfc9ghRz_5HksLHfW1Q-lflRg53HUgQ4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

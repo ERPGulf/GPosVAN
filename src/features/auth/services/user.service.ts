@@ -1,4 +1,5 @@
 import { tokenClient } from '@/src/services/api/httpClient';
+import { logger } from '@/src/services/logger';
 
 /**
  * Fetch offline POS users from the API.
@@ -11,6 +12,8 @@ export const userApi = async () => {
     return response.data;
   } catch (error) {
     console.error('[UserService] Error fetching offline users:', error);
+    logger.recordError(error, 'FetchOfflineUsers');
     throw error;
   }
 };
+

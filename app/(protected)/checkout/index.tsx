@@ -38,6 +38,7 @@ import {
 } from '@/src/infrastructure/db/invoices.repository';
 import { selectAppConfig } from '@/src/features/app/appConfigSlice';
 import { getMachineName } from '@/src/services/credentialStore';
+import { logger } from '@/src/services/logger';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -255,6 +256,7 @@ export default function CheckoutPage() {
       setIsInvoiceModalVisible(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to complete payment';
+      logger.recordError(error, 'CompletePayment');
       alert(message);
     }
   };
@@ -648,6 +650,7 @@ export default function CheckoutPage() {
                                 '[Checkout] Invoice sync failed due to network error, will retry via background sync',
                               );
                             }
+                            logger.log('Invoice sync deferred due to network error');
                           } else {
                             // Actual API error — server returned an error response
                             if (__DEV__) {
@@ -656,6 +659,7 @@ export default function CheckoutPage() {
                                 syncErr,
                               );
                             }
+                            logger.recordError(syncErr, 'CheckoutInvoiceSync');
 
                             // Capture the error message before the async IIFE
                             // (Hermes can't closure-capture catch block params in nested async functions)
@@ -679,6 +683,7 @@ export default function CheckoutPage() {
                               await markInvoiceSyncError(db, generatedInvoice.invoiceUUID, syncErr);
                             } catch (dbErr) {
                               console.error('[Checkout] Failed to save sync error to DB:', dbErr);
+                              logger.recordError(dbErr, 'CheckoutSaveSyncError');
                             }
 
                             // Fire-and-forget: sync the errored invoice to the uncleared endpoint
@@ -759,6 +764,7 @@ export default function CheckoutPage() {
                       })();
                     } catch (err) {
                       console.error('Failed to save invoice files:', err);
+                      logger.recordError(err, 'SaveInvoiceFiles');
                     }
                   }}
                 />

@@ -1,4 +1,5 @@
 import { selectAppConfig, setAppConfig } from '@/src/features/app/appConfigSlice';
+import { logger } from '@/src/services/logger';
 import { fetchPosSettings } from '@/src/features/app/services/posSettings.service';
 import { login } from '@/src/features/auth/authSlice';
 import * as schema from '@/src/infrastructure/db/schema';
@@ -72,6 +73,7 @@ export default function LoginScreen() {
       if (localResult.success && localResult.user) {
         const { password: _, ...userWithoutPassword } = localResult.user;
         dispatch(login(userWithoutPassword));
+        logger.setUser(userWithoutPassword.id ?? data.email, userWithoutPassword.email ?? data.email);
       } else {
         // User exists on server but not in local DB — create a minimal user from API response
         dispatch(
@@ -81,6 +83,7 @@ export default function LoginScreen() {
             username: userResponse.user.email,
           }),
         );
+        logger.setUser(userResponse.user.id, userResponse.user.email);
       }
 
       // ─── Fetch POS Settings (after tokens generated, before sync) ───
@@ -147,11 +150,13 @@ export default function LoginScreen() {
 
             const { password: _, ...userWithoutPassword } = offlineResult.user;
             dispatch(login(userWithoutPassword));
+            logger.setUser(userWithoutPassword.id ?? data.email, userWithoutPassword.email ?? data.email);
             router.replace('/(protected)');
           } else {
             setLoginError(offlineResult.error || 'Invalid credentials');
           }
         } catch (offlineError) {
+          logger.recordError(offlineError, 'OfflineLogin');
           setLoginError('Login failed. Please try again.');
         }
       } else {
