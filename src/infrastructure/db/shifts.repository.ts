@@ -12,6 +12,7 @@ import type { ShiftInvoiceDetails } from '../../features/shifts/services/shiftAp
 import { invoicePayments, invoices, shifts } from './schema';
 import { getMachineName } from '@/src/services/credentialStore';
 import { logger } from '@/src/services/logger';
+import { getSalesReturnCountForShift, getSalesReturnTotalForShift } from './salesReturn.repository';
 
 /**
  * Generate a shift local ID in the format: username-yyyyMMdd-MachineId
@@ -201,6 +202,10 @@ export const closeShift = async (
     }
   }
 
+  // Subtract sales return total from expected cash (returns are cash-only refunds)
+  const salesReturnTotal = await getSalesReturnTotalForShift(db, params.shiftLocalId);
+  expectedCash = expectedCash - salesReturnTotal;
+
   if (__DEV__) {
     console.log('[ShiftsRepository] Closing shift:', {
       shiftLocalId: params.shiftLocalId,
@@ -208,6 +213,7 @@ export const closeShift = async (
       closingCard: params.closingCard,
       expectedCash,
       expectedCard,
+      salesReturnTotal,
     });
   }
 
@@ -220,6 +226,7 @@ export const closeShift = async (
       closingExpectedCard: expectedCard,
       closingShiftDate: params.closingDate ?? new Date(),
       isShiftClosed: true,
+      salesReturn: salesReturnTotal,
     })
     .where(eq(shifts.shiftLocalId, params.shiftLocalId));
 };
@@ -228,7 +235,7 @@ export const closeShift = async (
 
 /**
  * Compute invoice details for a shift (counts and totals).
- * Return-related fields are hardcoded to 0 since returns aren't implemented.
+ * Queries actual sales return data from SalesReturn/SalesReturnItems tables.
  */
 export const getShiftInvoiceDetails = async (
   db: ExpoSQLiteDatabase,
@@ -268,15 +275,19 @@ export const getShiftInvoiceDetails = async (
 
   const totalOfInvoices = totalCash + totalCard;
 
+  // Query actual sales return data
+  const numberOfReturnInvoices = await getSalesReturnCountForShift(db, shiftLocalId);
+  const totalOfReturns = await getSalesReturnTotalForShift(db, shiftLocalId);
+
   return {
     number_of_invoices: numberOfInvoices,
-    number_of_return_invoices: 0,
+    number_of_return_invoices: numberOfReturnInvoices,
     total_of_invoices: totalOfInvoices,
-    total_of_returns: 0,
+    total_of_returns: totalOfReturns,
     total_of_cash: totalCash,
-    total_of_return_cash: 0,
-    total_of_bank: totalCard, // Card maps to "bank" in the API
-    total_of_return_bank: 0,
+    total_of_return_cash: totalOfReturns, // all returns are cash-only for now
+    total_of_bank: totalCard,
+    total_of_return_bank: 0, // no card refunds yet
   };
 };
 
