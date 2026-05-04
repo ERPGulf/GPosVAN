@@ -1,6 +1,7 @@
 import appConfigReducer from '@/src/features/app/appConfigSlice';
 import authReducer from '@/src/features/auth/authSlice';
 import cartReducer from '@/src/features/cart/cartSlice';
+import loyaltyReducer from '@/src/features/loyalty/loyaltySlice';
 import shiftReducer from '@/src/features/shifts/shiftSlice';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { combineReducers, configureStore } from '@reduxjs/toolkit';
@@ -31,6 +32,7 @@ const rootReducer = combineReducers({
   shift: persistReducer(shiftPersistConfig, shiftReducer),
   appConfig: persistReducer(appConfigPersistConfig, appConfigReducer),
   cart: cartReducer, // cart stays in-memory only (clears on app restart)
+  loyalty: loyaltyReducer, // loyalty stays in-memory only (clears on app restart)
 });
 
 // Store

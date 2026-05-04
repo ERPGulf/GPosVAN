@@ -17,9 +17,10 @@ interface OrderSummaryProps {
   onUpdateQuantity: (index: number, delta: number) => void;
   onCheckout: () => void;
   showActions?: boolean;
+  loyaltyDiscount?: number;
 }
 
-export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onCheckout, showActions = true }: OrderSummaryProps) {
+export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onCheckout, showActions = true, loyaltyDiscount = 0 }: OrderSummaryProps) {
   const isShiftOpen = useAppSelector(selectIsShiftOpen);
 
   const subtotal = cartItems.reduce((sum, item) => {
@@ -145,9 +146,17 @@ export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onChec
             -{discount.toFixed(2)}
           </Text>
         </View>
+        {loyaltyDiscount > 0 && (
+          <View className="flex-row justify-between mb-4">
+            <Text className="text-gray-500">Loyalty discount</Text>
+            <Text className="font-medium text-green-600">
+              -{loyaltyDiscount.toFixed(2)}
+            </Text>
+          </View>
+        )}
         <View className="flex-row justify-between mb-6 pt-4 border-t border-gray-200">
           <Text className="text-lg font-bold">Total</Text>
-          <Text className="text-lg font-bold">{total.toFixed(2)}</Text>
+          <Text className="text-lg font-bold">{Math.max(0, total - loyaltyDiscount).toFixed(2)}</Text>
         </View>
 
         {showActions && (

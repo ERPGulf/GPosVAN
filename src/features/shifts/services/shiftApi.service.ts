@@ -131,6 +131,7 @@ export interface ShiftInvoiceDetails {
   total_of_return_cash: number;
   total_of_bank: number;
   total_of_return_bank: number;
+  total_loyalty_amount_claimed: number;
 }
 
 // ─── Closing Shift API ───────────────────────────────────────────────────────
@@ -227,5 +228,6 @@ export const buildShiftDetails = (details: ShiftInvoiceDetails): string => {
     total_of_return_cash: 0,
     total_of_bank: details.total_of_bank,
     total_of_return_bank: 0,
+    total_loyality_amount_claimed: details.total_loyalty_amount_claimed,
   });
 };

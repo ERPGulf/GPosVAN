@@ -16,6 +16,8 @@ export interface InvoiceSyncParams {
   offlineInvoiceNumber: string; // invoiceNo
   customOfflineCreationTime: string; // 'YYYY-MM-DD HH:mm:ss'
   posShift: string; // shiftOpeningId (server sync_id)
+  loyaltyCustomerMobile?: string; // loyalty/coupon customer mobile
+  loyaltyCustomerName?: string; // loyalty/coupon customer name
 }
 
 export interface InvoiceSyncResponse {
@@ -55,6 +57,14 @@ export const syncInvoiceToServer = async (
   formData.append('offline_invoice_number', params.offlineInvoiceNumber);
   formData.append('custom_offline_creation_time', params.customOfflineCreationTime);
   formData.append('pos_shift', params.posShift);
+
+  // Append loyalty/coupon customer fields if present
+  if (params.loyaltyCustomerMobile) {
+    formData.append('mobile_no', params.loyaltyCustomerMobile);
+  }
+  if (params.loyaltyCustomerName) {
+    formData.append('coupen_customer_name', params.loyaltyCustomerName);
+  }
 
   // Attach QR PNG as file
   formData.append('qr_code', {
