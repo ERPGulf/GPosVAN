@@ -1,3 +1,5 @@
+import { logger } from '@/src/services/logger';
+
 type LogLevel = 'INFO' | 'WARN' | 'ERROR' | 'DEBUG';
 
 const DEBUG_FLAG = process.env.EXPO_PUBLIC_ZATCA_DEBUG === '1';
@@ -123,6 +125,10 @@ export const zatcaLogger = {
       ...sanitizeMeta(meta),
       ...errorMeta,
     });
+    // Bridge ZATCA errors to Firebase Crashlytics
+    if (error) {
+      logger.recordError(error, `ZATCA.${message}`);
+    }
   },
   debug(message: string, meta?: Record<string, unknown>): void {
     log('DEBUG', message, meta);

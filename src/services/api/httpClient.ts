@@ -6,6 +6,7 @@ import {
   getHostUrl,
 } from '@/src/services/credentialStore';
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { logger } from '@/src/services/logger';
 import {
   AppTokenResponse,
   clearUserTokens,
@@ -80,6 +81,7 @@ apiClient.interceptors.request.use(
       }
     } catch (error) {
       console.error('[HttpClient] Failed to get user token for request:', error);
+      logger.recordError(error, 'HttpClient.getToken');
     }
     return config;
   },
@@ -113,6 +115,7 @@ apiClient.interceptors.response.use(
         }
       } catch (refreshError) {
         console.error('[HttpClient] User token refresh failed:', refreshError);
+        logger.recordError(refreshError, 'HttpClient.tokenRefresh');
       }
 
       // Refresh failed — clear tokens (user will need to re-login)
@@ -167,6 +170,7 @@ export const generateAppToken = async (): Promise<string> => {
     return tokenData.access_token;
   } catch (error) {
     console.error('[HttpClient] Failed to generate app token:', error);
+    logger.recordError(error, 'GenerateAppToken');
     throw error;
   }
 };
@@ -218,6 +222,7 @@ export const generateUserToken = async (
     return data;
   } catch (error) {
     console.error('[HttpClient] Failed to generate user token:', error);
+    logger.recordError(error, 'GenerateUserToken');
     throw error;
   }
 };
@@ -281,6 +286,7 @@ const refreshUserTokenFlow = async (): Promise<string | null> => {
       return data.access_token;
     } catch (error) {
       console.error('[HttpClient] Token refresh failed:', error);
+      logger.recordError(error, 'RefreshUserTokenFlow');
       return null;
     } finally {
       setRefreshing(false);

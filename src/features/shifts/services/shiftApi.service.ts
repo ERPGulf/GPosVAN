@@ -1,4 +1,5 @@
 import { apiClient } from '@/src/services/api/httpClient';
+import { logger } from '@/src/services/logger';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -81,6 +82,7 @@ export const syncOpenShiftToServer = async (
     if (__DEV__) {
       console.error('[ShiftApi] Failed to sync open shift:', error?.response?.data || error.message);
     }
+    logger.recordError(error, 'SyncOpenShift');
     throw error;
   }
 };
@@ -183,6 +185,7 @@ export const syncCloseShiftToServer = async (
         error?.response?.data || error.message,
       );
     }
+    logger.recordError(error, 'SyncCloseShift');
     throw error;
   }
 };
