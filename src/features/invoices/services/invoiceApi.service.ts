@@ -1,4 +1,5 @@
 import { apiClient } from '@/src/services/api/httpClient';
+import { logger } from '@/src/services/logger';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -118,6 +119,7 @@ export const syncInvoiceToServer = async (
         error?.response?.data || error.message,
       );
     }
+    logger.recordError(error, 'InvoiceSync');
     throw error;
   }
 };
@@ -227,6 +229,7 @@ export const syncUnclearedInvoiceToServer = async (
         error?.response?.data || error.message,
       );
     }
+    logger.recordError(error, 'UnclearedInvoiceSync');
     throw error;
   }
 };

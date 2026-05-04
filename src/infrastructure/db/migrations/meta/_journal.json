@@ -36,6 +36,13 @@
       "when": 1745220000000,
       "tag": "0004_add_promotion_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1745400000000,
+      "tag": "0005_add_sales_return_tables",
+      "breakpoints": true
     }
   ]
 }

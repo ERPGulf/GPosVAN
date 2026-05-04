@@ -11,6 +11,8 @@ import {
 import type { ShiftInvoiceDetails } from '../../features/shifts/services/shiftApi.service';
 import { invoicePayments, invoices, shifts } from './schema';
 import { getMachineName } from '@/src/services/credentialStore';
+import { logger } from '@/src/services/logger';
+import { getSalesReturnCountForShift, getSalesReturnTotalForShift } from './salesReturn.repository';
 
 /**
  * Generate a shift local ID in the format: username-yyyyMMdd-MachineId
@@ -156,6 +158,7 @@ export const pushPendingOpenShifts = async (
         `[ShiftsRepository] Failed to push shift ${shift.shiftLocalId}:`,
         error,
       );
+      logger.recordError(error, 'PushPendingOpenShift');
     }
   }
 
@@ -204,6 +207,9 @@ export const closeShift = async (
 
   // Loyalty payments don't generate physical cash, so reduce expected cash
   expectedCash = Math.max(0, expectedCash - loyaltyTotal);
+  // Subtract sales return total from expected cash (returns are cash-only refunds)
+  const salesReturnTotal = await getSalesReturnTotalForShift(db, params.shiftLocalId);
+  expectedCash = expectedCash - salesReturnTotal;
 
   if (__DEV__) {
     console.log('[ShiftsRepository] Closing shift:', {
@@ -213,6 +219,7 @@ export const closeShift = async (
       expectedCash,
       expectedCard,
       loyaltyTotal,
+      salesReturnTotal,
     });
   }
 
@@ -226,6 +233,7 @@ export const closeShift = async (
       closingShiftDate: params.closingDate ?? new Date(),
       isShiftClosed: true,
       claimedLoyalityAmount: loyaltyTotal,
+      salesReturn: salesReturnTotal,
     })
     .where(eq(shifts.shiftLocalId, params.shiftLocalId));
 };
@@ -234,7 +242,7 @@ export const closeShift = async (
 
 /**
  * Compute invoice details for a shift (counts and totals).
- * Return-related fields are hardcoded to 0 since returns aren't implemented.
+ * Queries actual sales return data from SalesReturn/SalesReturnItems tables.
  */
 export const getShiftInvoiceDetails = async (
   db: ExpoSQLiteDatabase,
@@ -277,16 +285,20 @@ export const getShiftInvoiceDetails = async (
 
   const totalOfInvoices = totalCash + totalCard + totalLoyalty;
 
+  // Query actual sales return data
+  const numberOfReturnInvoices = await getSalesReturnCountForShift(db, shiftLocalId);
+  const totalOfReturns = await getSalesReturnTotalForShift(db, shiftLocalId);
+
   return {
     number_of_invoices: numberOfInvoices,
-    number_of_return_invoices: 0,
+    number_of_return_invoices: numberOfReturnInvoices,
     total_of_invoices: totalOfInvoices,
-    total_of_returns: 0,
+    total_of_returns: totalOfReturns,
     total_of_cash: totalCash,
-    total_of_return_cash: 0,
     total_of_bank: totalCard, // Card maps to "bank" in the API
     total_of_return_bank: 0,
     total_loyalty_amount_claimed: totalLoyalty,
+    total_of_return_cash: totalOfReturns, // all returns are cash-only for now
   };
 };
 
@@ -421,6 +433,7 @@ export const pushPendingCloseShifts = async (
         `[ShiftsRepository] Failed to push close shift ${shift.shiftLocalId}:`,
         error,
       );
+      logger.recordError(error, 'PushPendingCloseShift');
     }
   }
 

@@ -12,9 +12,12 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.bazim.Vanpos",
+      "googleServicesFile": "./config/GoogleService-Info.plist",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "UIDeviceFamily": [2],
+        "UIDeviceFamily": [
+          2
+        ],
         "UIRequiresFullScreen": true,
         "UISupportedInterfaceOrientations": [
           "UIInterfaceOrientationLandscapeLeft",
@@ -35,7 +38,8 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.bazim.Vanpos"
+      "package": "com.bazim.Vanpos",
+      "googleServicesFile": "./config/google-services.json"
     },
     "web": {
       "bundler": "metro",
@@ -54,7 +58,9 @@
             "useSQLCipher": false
           },
           "ios": {
-            "customBuildFlags": ["-DSQLITE_ENABLE_DBSTAT_VTAB=1 -DSQLITE_ENABLE_SNAPSHOT=1"]
+            "customBuildFlags": [
+              "-DSQLITE_ENABLE_DBSTAT_VTAB=1 -DSQLITE_ENABLE_SNAPSHOT=1"
+            ]
           }
         }
       ],
@@ -70,7 +76,10 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "@react-native-firebase/app",
+      "@react-native-firebase/crashlytics",
+      "expo-build-properties"
     ],
     "experiments": {
       "typedRoutes": true,

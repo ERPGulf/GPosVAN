@@ -1,4 +1,5 @@
 import { selectAppConfig } from '@/src/features/app/appConfigSlice';
+import { logger } from '@/src/services/logger';
 import { pushPendingCustomers, syncAllCustomers } from '@/src/infrastructure/db/customers.repository';
 import { syncAllProducts } from '@/src/infrastructure/db/products.repository';
 import { syncAllPromotions } from '@/src/infrastructure/db/promotions.repository';
@@ -41,6 +42,19 @@ export default function ProtectedLayout() {
     }
   }, [posProfiles, selectedPosProfile, dispatch]);
 
+  // Set Crashlytics context attributes for better crash filtering
+  useEffect(() => {
+    if (selectedPosProfile) {
+      logger.setAttribute('pos_profile', selectedPosProfile);
+    }
+  }, [selectedPosProfile]);
+
+  useEffect(() => {
+    if (currentShiftLocalId) {
+      logger.setAttribute('shift_id', currentShiftLocalId);
+    }
+  }, [currentShiftLocalId]);
+
   // Sync products and customers after login (uses user token via apiClient)
   useEffect(() => {
     if (!isAuthenticated || hasSynced.current) return;
@@ -56,6 +70,7 @@ export default function ProtectedLayout() {
         })
         .catch((err) => {
           console.error('[ProtectedLayout] Failed to push pending customers:', err);
+          logger.recordError(err, 'PushPendingCustomers');
         }),
       // Push pending open shifts
       (async () => {
@@ -83,6 +98,7 @@ export default function ProtectedLayout() {
           }
         } catch (err) {
           console.error('[ProtectedLayout] Failed to push pending open shifts:', err);
+          logger.recordError(err, 'PushPendingOpenShifts');
         }
       })(),
     ]).finally(() => {
@@ -96,6 +112,7 @@ export default function ProtectedLayout() {
           })
           .catch((err) => {
             console.error('[ProtectedLayout] Failed to sync products:', err);
+            logger.recordError(err, 'SyncProducts');
           }),
         syncAllCustomers(db)
           .then(() => {
@@ -105,6 +122,7 @@ export default function ProtectedLayout() {
           })
           .catch((err) => {
             console.error('[ProtectedLayout] Failed to sync customers:', err);
+            logger.recordError(err, 'SyncCustomers');
           }),
       ]);
     });
@@ -124,6 +142,7 @@ export default function ProtectedLayout() {
       })
       .catch((err) => {
         console.error('[ProtectedLayout] Failed to sync promotions:', err);
+        logger.recordError(err, 'SyncPromotions');
       });
   }, [isAuthenticated, selectedPosProfile]);
 
@@ -163,6 +182,7 @@ export default function ProtectedLayout() {
         <Drawer.Screen name="index" options={{ title: 'Dashboard' }} />
         <Drawer.Screen name="customers/index" options={{ title: 'Customers' }} />
         <Drawer.Screen name="checkout/index" options={{ title: 'Checkout' }} />
+        <Drawer.Screen name="sales-return/index" options={{ title: 'Sales Return' }} />
         <Drawer.Screen name="settings/page" options={{ title: 'Settings' }} />
       </Drawer>
     </View>

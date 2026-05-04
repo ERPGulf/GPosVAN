@@ -254,3 +254,57 @@ export const promotionItemsRelations = relations(promotionItems, ({ one }) => ({
     references: [promotions.promotionId],
   }),
 }));
+
+// SalesReturn table
+export const salesReturns = sqliteTable('SalesReturn', {
+  id: text('id')
+    .primaryKey()
+    .$defaultFn(() => Crypto.randomUUID()),
+  invoiceNumber: text('invoice_number'), // return's own local number (e.g. INV-2026-000042-RET)
+  invoiceId: text('invoice_id'), // original invoice's server-side ID (used as return_against)
+  customerId: text('customer_id'),
+  pih: text('pih'), // Previous Invoice Hash (ZATCA chaining)
+  qrPath: text('qr_path'), // path to generated QR code image
+  xmlPath: text('xml_path'), // path to ZATCA XML file
+  reason: text('reason'), // return reason + mobile number
+  createdOn: integer('created_on', { mode: 'timestamp' }).notNull(),
+  isSynced: integer('is_synced', { mode: 'boolean' }).default(false),
+  syncedOn: integer('synced_on', { mode: 'timestamp' }),
+  shiftId: text('shift_id'), // shift in which return was processed
+  userId: text('user_id'), // cashier who processed the return
+  posProfile: text('pos_profile'),
+  salesReturnId: text('sales_return_id'), // external return ID from ERP response
+  isError: integer('is_error', { mode: 'boolean' }).default(false),
+  errorMessage: text('error_message'),
+  isErrorSynced: integer('is_error_synced', { mode: 'boolean' }).default(false),
+  errorSyncTime: integer('error_sync_time', { mode: 'timestamp' }),
+});
+
+// SalesReturn relations
+export const salesReturnsRelations = relations(salesReturns, ({ many }) => ({
+  items: many(salesReturnItems),
+}));
+
+// SalesReturnItems table
+export const salesReturnItems = sqliteTable('SalesReturnItems', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  itemCode: text('item_code'),
+  itemName: text('item_name'),
+  quantity: real('quantity').default(0), // stored as NEGATIVE (credit note convention)
+  rate: real('rate').default(0),
+  taxRate: real('tax_rate').default(0),
+  uom: text('uom'),
+  discountType: text('discount_type'), // RATE | PERCENTAGE | AMOUNT | null
+  discountValue: real('discount_value').default(0),
+  minQty: integer('min_qty').default(0),
+  maxQty: integer('max_qty').default(0),
+  salesReturnId: text('sales_return_id').references(() => salesReturns.id),
+});
+
+// SalesReturnItems relations
+export const salesReturnItemsRelations = relations(salesReturnItems, ({ one }) => ({
+  salesReturn: one(salesReturns, {
+    fields: [salesReturnItems.salesReturnId],
+    references: [salesReturns.id],
+  }),
+}));

@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { logger } from '@/src/services/logger';
 
 // SecureStore keys for user tokens
 const USER_ACCESS_TOKEN_KEY = 'GPOS_USER_ACCESS_TOKEN';
@@ -85,6 +86,7 @@ export const saveUserTokens = async (tokenData: UserTokenData): Promise<void> =>
     }
   } catch (error) {
     console.error('[TokenManager] Failed to save user tokens:', error);
+    logger.recordError(error, 'TokenManager.saveTokens');
     throw error;
   }
 };
@@ -127,6 +129,7 @@ export const getUserAccessToken = async (): Promise<string | null> => {
     return token;
   } catch (error) {
     console.error('[TokenManager] Failed to get user access token:', error);
+    logger.recordError(error, 'TokenManager.getAccessToken');
     return null;
   }
 };
@@ -139,6 +142,7 @@ export const getUserRefreshToken = async (): Promise<string | null> => {
     return await SecureStore.getItemAsync(USER_REFRESH_TOKEN_KEY);
   } catch (error) {
     console.error('[TokenManager] Failed to get user refresh token:', error);
+    logger.recordError(error, 'TokenManager.getRefreshToken');
     return null;
   }
 };
@@ -171,6 +175,7 @@ export const clearUserTokens = async (): Promise<void> => {
     }
   } catch (error) {
     console.error('[TokenManager] Failed to clear user tokens:', error);
+    logger.recordError(error, 'TokenManager.clearTokens');
     throw error;
   }
 };

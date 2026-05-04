@@ -798,7 +798,10 @@ class ZatcaCryptoModule : Module() {
       details = "issuerLen=${cert.issuerDN.name.length}, serialLen=${cert.serialNumber.toString().length}",
     )
 
-    val issuer = cert.issuerDN.name
+    // ZATCA requires spaces after commas in the issuer DN (RFC 2253 style).
+    // Java's issuerDN.name may omit them, so we normalize: "CN=X,DC=Y" → "CN=X, DC=Y"
+    val rawIssuer = cert.issuerDN.name
+    val issuer = rawIssuer.replace(Regex(",(?!\\s)"), ", ")
     val serialNumber = cert.serialNumber.toString()
     val signatureBytes = cert.signature
     val signatureBase64 = android.util.Base64.encodeToString(signatureBytes, android.util.Base64.NO_WRAP)

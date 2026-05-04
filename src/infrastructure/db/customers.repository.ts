@@ -10,6 +10,7 @@ import { eq, getTableColumns, sql, SQL } from 'drizzle-orm';
 import { ExpoSQLiteDatabase } from 'drizzle-orm/expo-sqlite';
 import { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { randomUUID } from 'expo-crypto';
+import { logger } from '@/src/services/logger';
 import { customers } from './schema';
 
 /**
@@ -142,6 +143,7 @@ export const syncAllCustomers = async (db: ExpoSQLiteDatabase): Promise<void> =>
     }
   } catch (error) {
     console.error('[CustomersRepository] Customer sync failed:', error);
+    logger.recordError(error, 'SyncAllCustomers');
     throw error;
   }
 };
@@ -349,6 +351,7 @@ export const pushPendingCustomers = async (db: ExpoSQLiteDatabase): Promise<void
     } catch (error) {
       await updateCustomerSyncStatus(db, customer.id, 'failed');
       console.error(`[CustomersRepository] Failed to push customer ${customer.id}:`, error);
+      logger.recordError(error, 'PushPendingCustomer');
     }
   }
 };

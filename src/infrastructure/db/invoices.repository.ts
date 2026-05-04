@@ -1,9 +1,10 @@
-import { ExpoSQLiteDatabase } from 'drizzle-orm/expo-sqlite';
-import { and, eq, sql } from 'drizzle-orm';
-import { invoiceIdSequence, invoiceItems, invoicePayments, invoices } from './schema';
 import type { CartItem } from '@/src/features/cart/types';
 import { getMachineName } from '@/src/services/credentialStore';
+import { logger } from '@/src/services/logger';
 import { store } from '@/src/store/store';
+import { and, eq, sql } from 'drizzle-orm';
+import { ExpoSQLiteDatabase } from 'drizzle-orm/expo-sqlite';
+import { invoiceIdSequence, invoiceItems, invoicePayments, invoices } from './schema';
 
 // ─── Invoice number generator ────────────────────────────────────────────────
 
@@ -226,15 +227,8 @@ export async function saveInvoiceToDb(
 /**
  * Fetch an invoice with its items and payments for sync purposes.
  */
-export async function getInvoiceForSync(
-  db: ExpoSQLiteDatabase,
-  invoiceUUID: string,
-) {
-  const [invoice] = await db
-    .select()
-    .from(invoices)
-    .where(eq(invoices.id, invoiceUUID))
-    .limit(1);
+export async function getInvoiceForSync(db: ExpoSQLiteDatabase, invoiceUUID: string) {
+  const [invoice] = await db.select().from(invoices).where(eq(invoices.id, invoiceUUID)).limit(1);
 
   if (!invoice) return null;
 
@@ -311,12 +305,7 @@ export async function getErrorInvoices(db: ExpoSQLiteDatabase) {
   return db
     .select()
     .from(invoices)
-    .where(
-      and(
-        eq(invoices.isError, true),
-        eq(invoices.isErrorSynced, false),
-      ),
-    );
+    .where(and(eq(invoices.isError, true), eq(invoices.isErrorSynced, false)));
 }
 
 /**
@@ -340,10 +329,7 @@ export async function markInvoiceErrorSynced(
  * Fetch a single errored invoice with its items and payments,
  * ready for building the json_dump payload.
  */
-export async function getErrorInvoiceForSync(
-  db: ExpoSQLiteDatabase,
-  invoiceUUID: string,
-) {
+export async function getErrorInvoiceForSync(db: ExpoSQLiteDatabase, invoiceUUID: string) {
   const [invoice] = await db
     .select()
     .from(invoices)
@@ -382,12 +368,7 @@ export async function getUnsyncedInvoices(db: ExpoSQLiteDatabase) {
   return db
     .select()
     .from(invoices)
-    .where(
-      and(
-        eq(invoices.isSynced, false),
-        eq(invoices.isError, false),
-      ),
-    );
+    .where(and(eq(invoices.isSynced, false), eq(invoices.isError, false)));
 }
 
 /**
@@ -410,9 +391,8 @@ export async function pushPendingInvoices(
   },
 ): Promise<number> {
   // Lazy imports to avoid circular dependencies
-  const { syncInvoiceToServer, formatDateTimeForApi } = await import(
-    '../../features/invoices/services/invoiceApi.service'
-  );
+  const { syncInvoiceToServer, formatDateTimeForApi } =
+    await import('../../features/invoices/services/invoiceApi.service');
 
   const pending = await getUnsyncedInvoices(db);
 
@@ -491,28 +471,31 @@ export async function pushPendingInvoices(
       syncedCount++;
 
       if (__DEV__) {
-        console.log(`[InvoicesRepository] Pushed invoice ${inv.invoiceNo} → server ID: ${serverId}`);
+        console.log(
+          `[InvoicesRepository] Pushed invoice ${inv.invoiceNo} → server ID: ${serverId}`,
+        );
       }
     } catch (error: any) {
       // Detect if this is a network error (device offline) vs an actual API error
       const isNetworkError =
-        error &&
-        typeof error === 'object' &&
-        error.message === 'Network Error' &&
-        !error.response;
+        error && typeof error === 'object' && error.message === 'Network Error' && !error.response;
 
       if (isNetworkError) {
         // Network error — leave as isSynced=false, isError=false for next retry cycle
         if (__DEV__) {
-          console.log(`[InvoicesRepository] Network error pushing invoice ${inv.invoiceNo}, will retry later`);
+          console.log(
+            `[InvoicesRepository] Network error pushing invoice ${inv.invoiceNo}, will retry later`,
+          );
         }
       } else {
         console.error(`[InvoicesRepository] API error pushing invoice ${inv.invoiceNo}:`, error);
+        logger.recordError(error, 'PushPendingInvoice');
         // Mark as errored so it can be retried via the uncleared endpoint
         try {
           await markInvoiceSyncError(db, inv.id, error);
         } catch (dbErr) {
           console.error('[InvoicesRepository] Failed to save sync error:', dbErr);
+          logger.recordError(dbErr, 'PushPendingInvoice.saveError');
         }
       }
     }
@@ -541,11 +524,8 @@ export async function pushErroredInvoices(
     userId: string;
   },
 ): Promise<number> {
-  const {
-    buildInvoiceJsonDump,
-    formatDateTimeForApi,
-    syncUnclearedInvoiceToServer,
-  } = await import('../../features/invoices/services/invoiceApi.service');
+  const { buildInvoiceJsonDump, formatDateTimeForApi, syncUnclearedInvoiceToServer } =
+    await import('../../features/invoices/services/invoiceApi.service');
 
   const errored = await getErrorInvoices(db);
 
@@ -557,7 +537,9 @@ export async function pushErroredInvoices(
   }
 
   if (__DEV__) {
-    console.log(`[InvoicesRepository] Pushing ${errored.length} errored invoice(s) to uncleared endpoint...`);
+    console.log(
+      `[InvoicesRepository] Pushing ${errored.length} errored invoice(s) to uncleared endpoint...`,
+    );
   }
 
   let syncedCount = 0;
@@ -612,16 +594,18 @@ export async function pushErroredInvoices(
       syncedCount++;
 
       if (__DEV__) {
-        console.log(`[InvoicesRepository] Pushed errored invoice ${inv.invoiceNo} to uncleared endpoint`);
+        console.log(
+          `[InvoicesRepository] Pushed errored invoice ${inv.invoiceNo} to uncleared endpoint`,
+        );
       }
     } catch (error) {
       console.error(
         `[InvoicesRepository] Failed to push errored invoice ${inv.invoiceNo}:`,
         error,
       );
+      logger.recordError(error, 'PushErroredInvoice');
     }
   }
 
   return syncedCount;
 }
-

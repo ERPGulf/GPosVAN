@@ -40,6 +40,7 @@ import {
   saveInvoiceToDb,
 } from '@/src/infrastructure/db/invoices.repository';
 import { getMachineName } from '@/src/services/credentialStore';
+import { logger } from '@/src/services/logger';
 import { useAppDispatch, useAppSelector } from '@/src/store/hooks';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -50,7 +51,7 @@ import { useRouter } from 'expo-router';
 import * as Sharing from 'expo-sharing';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useEffect, useMemo, useState } from 'react';
-import { Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 type PaymentMethod = 'Cash/Card' | 'Cash' | 'Card';
 
@@ -298,6 +299,7 @@ export default function CheckoutPage() {
       setIsInvoiceModalVisible(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to complete payment';
+      logger.recordError(error, 'CompletePayment');
       alert(message);
     }
   };
@@ -352,9 +354,12 @@ export default function CheckoutPage() {
   };
 
   return (
-    <View className="flex-1 flex-row bg-gray-50 ">
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      className="flex-1 flex-row bg-gray-50"
+    >
       {/* Left Column: Actions */}
-      <ScrollView className="flex-1 p-6">
+      <ScrollView className="flex-1 p-6" contentContainerStyle={{ paddingBottom: 120 }}>
         <View>
           <View className="flex-row justify-between items-center mb-6">
             <Text className="text-2xl font-bold text-gray-800">Checkout</Text>
@@ -752,6 +757,7 @@ export default function CheckoutPage() {
                                 '[Checkout] Invoice sync failed due to network error, will retry via background sync',
                               );
                             }
+                            logger.log('Invoice sync deferred due to network error');
                           } else {
                             // Actual API error — server returned an error response
                             if (__DEV__) {
@@ -760,6 +766,7 @@ export default function CheckoutPage() {
                                 syncErr,
                               );
                             }
+                            logger.recordError(syncErr, 'CheckoutInvoiceSync');
 
                             // Capture the error message before the async IIFE
                             // (Hermes can't closure-capture catch block params in nested async functions)
@@ -783,6 +790,7 @@ export default function CheckoutPage() {
                               await markInvoiceSyncError(db, generatedInvoice.invoiceUUID, syncErr);
                             } catch (dbErr) {
                               console.error('[Checkout] Failed to save sync error to DB:', dbErr);
+                              logger.recordError(dbErr, 'CheckoutSaveSyncError');
                             }
 
                             // Fire-and-forget: sync the errored invoice to the uncleared endpoint
@@ -863,6 +871,7 @@ export default function CheckoutPage() {
                       })();
                     } catch (err) {
                       console.error('Failed to save invoice files:', err);
+                      logger.recordError(err, 'SaveInvoiceFiles');
                     }
                   }}
                 />
@@ -893,7 +902,7 @@ export default function CheckoutPage() {
           </View>
         </View>
       </Modal>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
