@@ -419,7 +419,7 @@ export default function SalesReturnPage() {
             <Ionicons name="search" size={18} color="#9ca3af" />
             <TextInput
               className="flex-1 ml-2 text-sm text-gray-800"
-              placeholder="Enter invoice number (e.g. INV-2026-000042 or ACC-SINV-2026-00043)"
+              placeholder="Enter synced invoice number (e.g. ACC-SINV-2026-00043)"
               placeholderTextColor="#9ca3af"
               value={searchTerm}
               onChangeText={(text) => dispatch(setSearchTerm(text))}

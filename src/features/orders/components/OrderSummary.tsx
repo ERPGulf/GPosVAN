@@ -5,6 +5,7 @@ import React from 'react';
 import { Alert, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { CartItem } from '../../cart/types';
 import {
+  calculateCartTax,
   calculateItemDiscount,
   calculateItemTotal,
   calculateTotalDiscount,
@@ -18,9 +19,10 @@ interface OrderSummaryProps {
   onCheckout: () => void;
   showActions?: boolean;
   loyaltyDiscount?: number;
+  isTaxIncludedInPrice?: boolean;
 }
 
-export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onCheckout, showActions = true, loyaltyDiscount = 0 }: OrderSummaryProps) {
+export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onCheckout, showActions = true, loyaltyDiscount = 0, isTaxIncludedInPrice = false }: OrderSummaryProps) {
   const isShiftOpen = useAppSelector(selectIsShiftOpen);
 
   const subtotal = cartItems.reduce((sum, item) => {
@@ -28,7 +30,10 @@ export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onChec
     return sum + rate * item.quantity;
   }, 0);
   const discount = calculateTotalDiscount(cartItems);
-  const total = subtotal - discount;
+  const taxAmount = calculateCartTax(cartItems, isTaxIncludedInPrice);
+  const netAfterDiscount = subtotal - discount;
+  // Tax-exclusive: total = net + VAT. Tax-inclusive: total = net (VAT already inside).
+  const total = isTaxIncludedInPrice ? netAfterDiscount : netAfterDiscount + taxAmount;
 
   const handleCheckoutPress = () => {
     if (cartItems.length === 0) {
@@ -140,20 +145,30 @@ export function OrderSummary({ cartItems, onRemoveItem, onUpdateQuantity, onChec
           <Text className="text-gray-500">Subtotal</Text>
           <Text className="font-medium">{subtotal.toFixed(2)}</Text>
         </View>
-        <View className="flex-row justify-between mb-4">
-          <Text className="text-gray-500">Discount</Text>
-          <Text className={`font-medium ${discount > 0 ? 'text-green-600' : 'text-red-500'}`}>
-            -{discount.toFixed(2)}
-          </Text>
-        </View>
+        {discount > 0 && (
+          <View className="flex-row justify-between mb-2">
+            <Text className="text-gray-500">Discount</Text>
+            <Text className="font-medium text-green-600">
+              -{discount.toFixed(2)}
+            </Text>
+          </View>
+        )}
         {loyaltyDiscount > 0 && (
-          <View className="flex-row justify-between mb-4">
+          <View className="flex-row justify-between mb-2">
             <Text className="text-gray-500">Loyalty discount</Text>
             <Text className="font-medium text-green-600">
               -{loyaltyDiscount.toFixed(2)}
             </Text>
           </View>
         )}
+        <View className="flex-row justify-between mb-4">
+          <Text className="text-gray-500">
+            VAT{isTaxIncludedInPrice ? ' (included)' : ' (15%)'}
+          </Text>
+          <Text className="font-medium text-gray-700">
+            {isTaxIncludedInPrice ? '' : '+'}{taxAmount.toFixed(2)}
+          </Text>
+        </View>
         <View className="flex-row justify-between mb-6 pt-4 border-t border-gray-200">
           <Text className="text-lg font-bold">Total</Text>
           <Text className="text-lg font-bold">{Math.max(0, total - loyaltyDiscount).toFixed(2)}</Text>
