@@ -31,7 +31,7 @@ export interface InvoiceSyncResponse {
     total: number;
     net_total: number;
     grand_total: number;
-    'Customer\'s Purchase Order': number;
+    "Customer's Purchase Order": number;
     discount_amount: number;
   };
 }
@@ -42,9 +42,7 @@ export interface InvoiceSyncResponse {
  * Sync a completed invoice to the server via multipart/form-data.
  * Returns the server-generated invoice ID (e.g. "ACC-SINV-2026-00043").
  */
-export const syncInvoiceToServer = async (
-  params: InvoiceSyncParams,
-): Promise<string> => {
+export const syncInvoiceToServer = async (params: InvoiceSyncParams): Promise<string> => {
   const formData = new FormData();
 
   formData.append('customer_name', params.customerName);
@@ -63,9 +61,9 @@ export const syncInvoiceToServer = async (
   if (params.loyaltyCustomerMobile) {
     formData.append('mobile_no', params.loyaltyCustomerMobile);
   }
-  if (params.loyaltyCustomerName) {
-    formData.append('coupen_customer_name', params.loyaltyCustomerName);
-  }
+  // if (params.loyaltyCustomerName) {
+  //   formData.append('coupen_customer_name', params.loyaltyCustomerName);
+  // }
 
   // Attach QR PNG as file
   formData.append('qr_code', {
@@ -114,10 +112,7 @@ export const syncInvoiceToServer = async (
     return serverId;
   } catch (error: any) {
     if (__DEV__) {
-      console.error(
-        '[InvoiceApi] Failed to sync invoice:',
-        error?.response?.data || error.message,
-      );
+      console.error('[InvoiceApi] Failed to sync invoice:', error?.response?.data || error.message);
     }
     logger.recordError(error, 'InvoiceSync');
     throw error;
@@ -140,10 +135,10 @@ export const formatDateTimeForApi = (date: Date): string => {
 // ─── Uncleared (Errored) Invoice Sync ────────────────────────────────────────
 
 export interface UnclearedInvoiceSyncParams {
-  dateTime: string;            // 'YYYY-MM-DD HH:mm:ss'
-  invoiceNumber: string;       // local invoice number (invoiceNo)
-  jsonDump: string;            // full serialized invoice JSON
-  apiResponse: string;         // error message from the original failed sync
+  dateTime: string; // 'YYYY-MM-DD HH:mm:ss'
+  invoiceNumber: string; // local invoice number (invoiceNo)
+  jsonDump: string; // full serialized invoice JSON
+  apiResponse: string; // error message from the original failed sync
 }
 
 /**
@@ -158,13 +153,13 @@ export const buildInvoiceJsonDump = (params: {
   phase: string;
   offlineInvoiceNumber: string;
   posProfile: string;
-  cashier: string;              // userId
+  cashier: string; // userId
   customerName: string;
-  uniqueId: string;             // invoiceUUID
+  uniqueId: string; // invoiceUUID
   customerPurchaseOrder: string;
-  pih: string;                  // previous invoice hash
-  payments: string;             // JSON array string: [{mode_of_payment, amount}]
-  items: string;                // JSON array string: [{item_code, quantity, rate, uom, tax_rate}]
+  pih: string; // previous invoice hash
+  payments: string; // JSON array string: [{mode_of_payment, amount}]
+  items: string; // JSON array string: [{item_code, quantity, rate, uom, tax_rate}]
 }): string => {
   return JSON.stringify({
     machine_name: params.machineName,
@@ -209,15 +204,11 @@ export const syncUnclearedInvoiceToServer = async (
   }
 
   try {
-    await apiClient.post(
-      '/gpos.gpos.pos.create_invoice_unsynced',
-      formData.toString(),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
+    await apiClient.post('/gpos.gpos.pos.create_invoice_unsynced', formData.toString(), {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
-    );
+    });
 
     if (__DEV__) {
       console.log('[InvoiceApi] Uncleared invoice synced successfully:', params.invoiceNumber);
@@ -233,4 +224,3 @@ export const syncUnclearedInvoiceToServer = async (
     throw error;
   }
 };
-
