@@ -77,3 +77,29 @@ export function getDiscountValueForInvoice(promotion: PromotionItem): number {
       return 0;
   }
 }
+
+/**
+ * Calculate total VAT for all cart items (after promo discounts).
+ *
+ * @param isTaxIncluded - When true, item prices already contain VAT and we
+ *   back-calculate to extract the tax portion. When false, VAT is computed
+ *   forward on top of the net line amount.
+ */
+export function calculateCartTax(items: CartItem[], isTaxIncluded: boolean): number {
+  let totalTax = 0;
+
+  for (const item of items) {
+    const lineTotal = calculateItemTotal(item);
+    const taxPct = item.product.taxPercentage || 15;
+
+    if (isTaxIncluded) {
+      // Back-calculate: tax = amount - amount / (1 + pct/100)
+      totalTax += lineTotal - lineTotal / (1 + taxPct / 100);
+    } else {
+      // Forward-calculate: tax = amount * pct / 100
+      totalTax += (lineTotal * taxPct) / 100;
+    }
+  }
+
+  return Math.round(totalTax * 100) / 100;
+}
