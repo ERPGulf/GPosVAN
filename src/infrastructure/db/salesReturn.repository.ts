@@ -285,20 +285,15 @@ export async function getInvoiceByServerId(db: ExpoSQLiteDatabase, serverId: str
 }
 
 /**
- * Try to look up an invoice by either local number or server-side ID.
- * Tries local number first, then server-side ID.
+ * Look up a synced invoice by its server-side ERP ID (e.g. ACC-SINV-2026-00043).
+ * Only synced invoices (those with a server-assigned invoiceId) are eligible
+ * for sales returns.
  */
 export async function lookupInvoice(
   db: ExpoSQLiteDatabase,
   searchTerm: string,
 ): Promise<{ invoice: OriginalInvoice; splitItems: SplitInvoiceItem[] } | null> {
-  // Try local invoice number first
-  let result = await getInvoiceByLocalNo(db, searchTerm.trim());
-
-  // Fall back to server-side ID
-  if (!result) {
-    result = await getInvoiceByServerId(db, searchTerm.trim());
-  }
+  const result = await getInvoiceByServerId(db, searchTerm.trim());
 
   if (!result) return null;
 
